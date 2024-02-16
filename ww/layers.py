@@ -16,12 +16,10 @@ class BinaryConv2D(nn.Module):
         self.weight = nn.Parameter(
             torch.Tensor(out_channel, in_channel, ker_size, ker_size)
         )
-        nn.init.uniform_(self.weight, -0.1, 0.1)  # 使用与TensorFlow类似的初始化
+        nn.init.uniform_(self.weight, -0.1, 0.1)
 
         if ker_bias:
-            self.ker_bias = nn.Parameter(
-                torch.Tensor(int(out_channel), 1, 1, 1)
-            )
+            self.ker_bias = nn.Parameter(torch.Tensor(int(out_channel), 1, 1, 1))
             nn.init.constant_(self.ker_bias, 0)
         else:
             self.register_parameter("ker_bias", None)
@@ -47,9 +45,7 @@ class BinaryConv2D(nn.Module):
                 else torch.sign(self.weight)
             )
 
-        return self.nmk * F.conv2d(
-            x, weight, None, self.num_stride, padding="same"
-        )
+        return self.nmk * F.conv2d(x, weight, None, self.num_stride, padding="same")
 
 
 class BinaryConv2DCL(BinaryConv2D):
@@ -73,7 +69,28 @@ class BinaryConv2DCL(BinaryConv2D):
                 else torch.sign(self.weight)
             )
         self.reg_loss = 0.2 * torch.sum(torch.relu(torch.abs(self.weight) - 0.2) ** 2)
-        return self.nmk * F.conv2d(
-            x, weight, None, self.num_stride, padding="same"
-        )
+        return self.nmk * F.conv2d(x, weight, None, self.num_stride, padding="same")
+
+
+class BinaryDense(nn.Module):
+    def __init__(self, in_channel, out_channel):
+        super(BinaryDense, self).__init__()
+        self.weight = nn.Parameter(torch.Tensor(out_channel, in_channel))
+        self.bias = nn.Parameter(torch.Tensor(out_channel))
+        self.nmk = nn.Parameter(torch.Tensor([1.0]))
+        self.kk = nn.Parameter(torch.Tensor([1.0]), requires_grad=False)
+        nn.init.uniform_(self.weight, -0.1, 0.1)
+        nn.init.constant_(self.bias, 0.0)
+
+    def set_kk(self, kk_new):
+        with torch.no_grad():
+            self.kk.fill_(kk_new)
+
+    def forward(self, inputs):
+        if self.kk < 1e3:
+            return self.nmk * F.linear(
+                inputs, torch.tanh(self.weight * self.kk), self.bias
+            )
+        else:
+            return self.nmk * F.linear(inputs, torch.sign(self.weight), self.bias)
 
