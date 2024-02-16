@@ -94,3 +94,43 @@ class BinaryDense(nn.Module):
         else:
             return self.nmk * F.linear(inputs, torch.sign(self.weight), self.bias)
 
+
+class BinaryActivation(nn.Module):
+    def __init__(self, ker_bias=False):
+        super(BinaryActivation, self).__init__()
+        self.ker_bias = ker_bias
+        self.bias = nn.Parameter(torch.Tensor([1.0]), requires_grad=ker_bias)
+        self.kk = nn.Parameter(torch.Tensor([1.0]), requires_grad=False)
+
+    def set_kk(self, kk_new):
+        with torch.no_grad():
+            self.kk.fill_(kk_new)
+
+    def forward(self, inputs):
+        if self.kk < 1e3:
+            return torch.tanh(inputs * self.kk) + self.bias
+        else:
+            return torch.sign(inputs) + self.bias
+
+
+class BinaryActivationHT(BinaryActivation):
+    def __init__(self, ker_bias=False):
+        super().__init__(ker_bias)
+
+    def forward(self, inputs):
+        if self.kk < 1e3:
+            return torch.clip(inputs * self.kk, min=-1, max=1) + self.bias
+        else:
+            return torch.sign(inputs) + self.bias
+
+
+class BinaryActivationRL(BinaryActivation):
+    def __init__(self, ker_bias=False):
+        super().__init__(ker_bias)
+        self.bias = nn.Parameter(torch.Tensor([0.0]), requires_grad=ker_bias)
+
+    def forward(self, inputs):
+        if self.kk < 1e3:
+            return torch.tanh(torch.relu(inputs) * self.kk) + self.bias
+        else:
+            return torch.sign(inputs) / 2 + (0.5 + self.bias)
