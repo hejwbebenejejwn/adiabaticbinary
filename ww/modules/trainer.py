@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from base import Base
+from modules.base import Base
 from torch.utils.data import DataLoader
 
 
