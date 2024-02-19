@@ -1,8 +1,8 @@
-from ww.layers import BinaryDense
-from ww.layers import BinaryActivationRL
+from modules.layers import BinaryDense
+from modules.layers import BinaryActivationRL
 import torch
 import torch.nn as nn
-from ww.base import Base
+from modules.base import Base
 
 
 class DenseNet(Base):
