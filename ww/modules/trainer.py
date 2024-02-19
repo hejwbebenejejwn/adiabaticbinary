@@ -102,7 +102,7 @@ class Trainer:
 
             if self.binbest < vbin:
                 self.binbest = vbin
-                torch.save(self.model.state_dict(), 'C:/Projects/Binary/adiabaticbinary/ww/'+header+'/binbest.pth')
+                torch.save(self.model.state_dict(), 'C:/Projects/Binary/wwdata/'+header+'/binbest.pth')
                 print("\033[94mtest perf: ",end="")
                 self.evaluate(testloader)
                 print("\033[0m",end="")
