@@ -1,5 +1,5 @@
 import torch
-# from Dense_mnist import DenseNet
+from modules.Dense_mnist import DenseNet
 from modules.trainer import Trainer
 from torch.nn import CrossEntropyLoss
 from argparse import ArgumentParser
