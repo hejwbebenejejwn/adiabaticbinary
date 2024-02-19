@@ -14,10 +14,10 @@ class Base(nn.Module,ABC):
     def set_ka(self, kka):
         pass
     @abstractmethod 
-    def get_kk(self):
+    def get_kk(self)->nn.parameter.Parameter:
         pass
     @abstractmethod 
-    def get_ka(self):
+    def get_ka(self)->nn.parameter.Parameter:
         pass
     @abstractmethod
     def forward(self, x: torch.Tensor):
