@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from modules.base import Base
+import modules.base as base
 from torch.utils.data import DataLoader
 
 
@@ -10,7 +10,7 @@ class Trainer:
         self,
         same_wts_ep,
         mode,
-        model: Base,
+        model: base.Base,
         optim: torch.optim.Adam,
         lossfunc: nn.CrossEntropyLoss,
     ):
@@ -72,7 +72,7 @@ class Trainer:
                 lnr / (self.model.get_kk() / self.lr_base) ** self.lr_power
                 if self.mode == "w"
                 else lnr / (self.model.get_ka() / self.lr_base) ** self.lr_power
-            )
+            ).item()
             for param_group in self.optim.param_groups:
                 param_group["lr"] = lr
             self.sw_epc += 1
@@ -81,14 +81,19 @@ class Trainer:
                 epoch_i + 1,
                 "sw",
                 self.sw_epc,
-                "mxep",
+                "maxep",
                 max_epochs,
                 "tg",
-                self.target_acc,
-                "bb",
-                self.binbest,
+                round(self.target_acc,3),
+                "bbest",
+                round(self.binbest,3),
+                "vbest",
+                round(val_best,3),
+                'kk',
+                round(self.model.get_ka().item() if self.pmode=='a' else self.model.get_kk().item(),3)
             )
-            vala = self.fit(trainloader)
+            self.fit(trainloader)
+            vala=self.evaluate(valloader)
             val_best = max(vala, val_best)
 
             if self.mode == "b" or self.mode == "w":
@@ -104,8 +109,8 @@ class Trainer:
                 self.binbest = vbin
                 torch.save(self.model.state_dict(), 'C:/Projects/Binary/wwdata/'+header+'/binbest.pth')
                 print("\033[94mtest perf: ",end="")
-                self.evaluate(testloader)
-                print("\033[0m",end="")
+                print(self.evaluate(testloader))
+                print("\033[0m")
 
             if self.mode == "b" or self.mode == "w":
                 self.model.set_kk(kk_now)

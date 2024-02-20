@@ -1,18 +1,17 @@
-from modules.layers import BinaryDense
-from modules.layers import BinaryActivationRL
+import modules.layers as layers
 import torch
 import torch.nn as nn
-from modules.base import Base
+import modules.base as base
 
 
-class DenseNet(Base):
+class DenseNet(base.Base):
     def __init__(self, binW, binA):
         super().__init__(binW,binA)
         self.dense1 = (
-            BinaryDense(28 * 28, 128) if binW else nn.Linear(28 * 28, 128)
+            layers.BinaryDense(28 * 28, 128) if binW else nn.Linear(28 * 28, 128)
         )
-        self.dense2 = BinaryDense(128, 10) if binW else nn.Linear(128, 10)
-        self.actv1 = BinaryActivationRL() if binA else nn.ReLU()
+        self.dense2 = layers.BinaryDense(128, 10) if binW else nn.Linear(128, 10)
+        self.actv1 = layers.BinaryActivationRL() if binA else nn.ReLU()
         self.actv2 = nn.Softmax(dim=1)
         self.drop = nn.Dropout(0.2)
 

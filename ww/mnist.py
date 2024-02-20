@@ -3,6 +3,31 @@ from modules.Dense_mnist import DenseNet
 from modules.trainer import Trainer
 from torch.nn import CrossEntropyLoss
 from argparse import ArgumentParser
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, Subset
+import numpy as np
+
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+
+train_dataset = datasets.MNIST(root='C:/Projects/Binary/wwdata', train=True, download=False, transform=transform)
+test_dataset = datasets.MNIST(root='C:/Projects/Binary/wwdata', train=False, download=False, transform=transform)
+
+y_train = np.array(train_dataset.targets)
+
+idx = np.argsort(y_train)
+
+vdx = np.array([6000*i+j for i in range(10) for j in range(5400, 6000)])
+tdx = np.array([6000*i+j for i in range(10) for j in range(5400)])
+
+train_subset = Subset(train_dataset, indices=idx[tdx])
+val_subset = Subset(train_dataset, indices=idx[vdx])
+
+train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
+val_loader = DataLoader(val_subset, batch_size=64, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 
 parser = ArgumentParser()
@@ -11,12 +36,7 @@ parser.add_argument("-a", "--bina", action="store_true")
 args = parser.parse_args()
 bw, ba = args.binw, args.bina
 print(bw,ba)
-val_loader = 0
-train_loader = 0
-test_loader = 0
 
-bw = True
-ba = True
 if bw and not ba:
     mode = "w"
 elif ba and not bw:
