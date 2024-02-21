@@ -1,18 +1,19 @@
-import modules.layers as layers
+# import modules.layers as layers
+import layers
 import torch
 import torch.nn as nn
-import modules.base as base
+# import modules.base as base
+import base
 
 
 class DenseNet(base.Base):
     def __init__(self, binW, binA):
-        super().__init__(binW,binA)
+        super().__init__(binW, binA)
         self.dense1 = (
             layers.BinaryDense(28 * 28, 128) if binW else nn.Linear(28 * 28, 128)
         )
         self.dense2 = layers.BinaryDense(128, 10) if binW else nn.Linear(128, 10)
         self.actv1 = layers.BinaryActivationRL() if binA else nn.ReLU()
-        self.actv2 = nn.Softmax(dim=1)
         self.drop = nn.Dropout(0.2)
 
     def set_kk(self, kka):
@@ -41,7 +42,8 @@ class DenseNet(base.Base):
         x = self.dense1(x)
         x = self.actv1(x)
         x = self.drop(x)
-        return self.actv2(x)
+        x = self.dense2(x)
+        return x
 
 
 if __name__ == "__main__":
@@ -50,5 +52,5 @@ if __name__ == "__main__":
     print("ka")
     print(net.get_kk())
     print("kk")
-    x=torch.randn(4,1,28,28)
+    x = torch.randn(4, 1, 28, 28)
     print(net(x))

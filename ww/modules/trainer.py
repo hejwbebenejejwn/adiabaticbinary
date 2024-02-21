@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import modules.base as base
+# import modules.base as base
+import base
 from torch.utils.data import DataLoader
 
 
@@ -17,8 +18,7 @@ class Trainer:
         self.model = model
         self.optim = optim
         self.lossfunc = lossfunc
-        self.target_acc = 1.0
-        self.binbest = 0.0
+        self.target_acc = 0.97
         self.same_wts_ep = same_wts_ep
         self.sw_epc = 0
         self.mode = mode
@@ -66,7 +66,21 @@ class Trainer:
         header,
         testloader,
     ):
+        if self.mode == "b" or self.mode == "w":
+            kk_now = torch.clone(self.model.get_kk()).item()
+            self.model.set_kk(1e5)
+        if self.mode == "b" or self.mode == "a":
+            ka_now = torch.clone(self.model.get_ka()).item()
+            self.model.set_ka(1e5)
+        self.binbest = self.evaluate(valloader)
+        print(f'last binbest:{self.binbest}, ka:{ka_now}, kk:{kk_now}')
+        if self.mode == "b" or self.mode == "w":
+            self.model.set_kk(kk_now)
+        if self.mode == "b" or self.mode == "a":        
+            self.model.set_ka(ka_now)
         val_best = 0
+
+
         for epoch_i in range(max_epochs):
             lr = (
                 lnr / (self.model.get_kk() / self.lr_base) ** self.lr_power
@@ -84,16 +98,23 @@ class Trainer:
                 "maxep",
                 max_epochs,
                 "tg",
-                round(self.target_acc,3),
+                round(self.target_acc, 3),
                 "bbest",
-                round(self.binbest,3),
+                round(self.binbest, 3),
                 "vbest",
-                round(val_best,3),
-                'kk',
-                round(self.model.get_ka().item() if self.pmode=='a' else self.model.get_kk().item(),3)
+                round(val_best, 3),
+                "kk",
+                round(
+                    (
+                        self.model.get_ka().item()
+                        if self.pmode == "a"
+                        else self.model.get_kk().item()
+                    ),
+                    3,
+                ),
             )
             self.fit(trainloader)
-            vala=self.evaluate(valloader)
+            vala = self.evaluate(valloader)
             val_best = max(vala, val_best)
 
             if self.mode == "b" or self.mode == "w":
@@ -107,8 +128,11 @@ class Trainer:
 
             if self.binbest < vbin:
                 self.binbest = vbin
-                torch.save(self.model.state_dict(), 'C:/Projects/Binary/wwdata/'+header+'/binbest.pth')
-                print("\033[94mtest perf: ",end="")
+                torch.save(
+                    self.model.state_dict(),
+                    "C:/Projects/Binary/wwdata/" + header + "/binbest.pth",
+                )
+                print("\033[94mtest perf: ", end="")
                 print(self.evaluate(testloader))
                 print("\033[0m")
 
@@ -131,7 +155,7 @@ class Trainer:
                     for _ in range(self.maxpush):
                         if vala < self.target_acc or self.model.get_kk().item() > 1e3:
                             break
-                        self.model.set_kk(self.model.get_kk() * self.prto)
+                        self.model.set_kk(self.model.get_kk().item() * self.prto)
                         vala = self.evaluate(valloader)
                         print("push kk to", self.model.get_kk().item(), "acc=", vala)
                     if self.mode == "b":
@@ -140,7 +164,7 @@ class Trainer:
                     for _ in range(self.maxpush):
                         if vala < self.target_acc or self.model.get_ka().item() > 1e3:
                             break
-                        self.model.set_ka(self.model.get_ka() * self.prto)
+                        self.model.set_ka(self.model.get_ka().item() * self.prto)
                         vala = self.evaluate(valloader)
                         print("push ka to", self.model.get_ka().item(), "acc=", vala)
                     if self.mode == "b":
@@ -154,3 +178,136 @@ class Trainer:
             if self.mode == "b" or self.mode == "a":
                 if self.model.get_ka().item() > 1e3:
                     break
+
+
+if __name__ == "__main__":
+    from Dense_mnist import DenseNet
+    from trainer import Trainer
+    from torch.nn import CrossEntropyLoss
+    from torchvision import datasets, transforms
+    from torch.utils.data import DataLoader, Subset
+    import numpy as np
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
+    ])
+
+    train_dataset = datasets.MNIST(root='C:/Projects/Binary/wwdata', train=True, download=False, transform=transform)
+    test_dataset = datasets.MNIST(root='C:/Projects/Binary/wwdata', train=False, download=False, transform=transform)
+
+    y_train = np.array(train_dataset.targets)
+
+    idx = np.argsort(y_train)
+
+    vdx = np.array([6000*i+j for i in range(10) for j in range(5400, 6000)])
+    tdx = np.array([6000*i+j for i in range(10) for j in range(5400)])
+
+    train_subset = Subset(train_dataset, indices=idx[tdx])
+    val_subset = Subset(train_dataset, indices=idx[vdx])
+
+    train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val_subset, batch_size=64, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+
+    bw=ba=True
+    print(bw,ba)
+    header='mnist1'
+    if bw and not ba:
+        mode = "w"
+    elif ba and not bw:
+        mode = "a"
+    else:
+        mode = "b"
+    print("mnist, mode: " + mode)
+    model = DenseNet(bw, ba)
+    model.load_state_dict(torch.load("C:/Projects/Binary/wwdata/" + header + "/binbest.pth"))
+    print(model.get_kk().item())
+    optz = torch.optim.Adam(model.parameters())
+    lossfunc = CrossEntropyLoss()
+    trr = Trainer(1000, mode, model, optz, lossfunc)
+    trr.val_bs = 32
+    trr.lr_power = 0.2
+
+    print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
+
+    if mode == "a":
+        trr.sw_epc = 0
+        trr.lr_base = 1.5
+        trr.lr_power = 0.3
+        model.set_ka(trr.lr_base)
+        trr.train(
+            trainloader=train_loader,
+            valloader=val_loader,
+            max_epochs=8,
+            lnr=1e-3,
+            header="mnist",
+            testloader=test_loader,
+        )
+        model.set_ka(6)
+        trr.train(
+            trainloader=train_loader,
+            valloader=val_loader,
+            max_epochs=3,
+            lnr=1e-3,
+            header="mnist",
+            testloader=test_loader,
+        )
+        model.set_ka(1001)
+        trr.train(
+            trainloader=train_loader,
+            valloader=val_loader,
+            max_epochs=2,
+            lnr=1e-3,
+            header="mnist",
+            testloader=test_loader,
+        )
+    if mode == "w":
+        trr.sw_epc = 0
+        trr.lr_base = 3.0
+        model.set_kk(trr.lr_base)
+        trr.train(
+            trainloader=train_loader,
+            valloader=val_loader,
+            max_epochs=8,
+            lnr=1e-3,
+            header="mnist",
+            testloader=test_loader,
+        )
+        for kkz in [10, 20, 50, 100, 300, 500, 999]:
+            model.set_kk(kkz)
+            trr.train(
+                trainloader=train_loader,
+                valloader=val_loader,
+                max_epochs=3,
+                lnr=1e-3,
+                header="mnist",
+                testloader=test_loader,
+            )
+    if mode == "b":
+        trr.sw_epc = 0
+        trr.lr_base = 3.0
+        if model.get_kk().item()<3:
+            model.set_kk(trr.lr_base)
+        if model.get_ka().item()<3:
+            model.set_ka(trr.lr_base)
+        trr.train(
+            trainloader=train_loader,
+            valloader=val_loader,
+            max_epochs=8,
+            lnr=1e-3,
+            header=header,
+            testloader=test_loader,
+        )
+        for kkz in [10, 20, 50, 100, 300, 500, 999]:
+            model.set_ka(kkz)
+            model.set_kk(kkz)
+            trr.train(
+                trainloader=train_loader,
+                valloader=val_loader,
+                max_epochs=3,
+                lnr=1e-3,
+                header="mnist",
+                testloader=test_loader,
+            )
