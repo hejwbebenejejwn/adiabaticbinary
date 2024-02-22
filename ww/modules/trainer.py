@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import modules.base as base
-# import base
+# import modules.base as base
+import base
 from torch.utils.data import DataLoader
 
 
@@ -30,7 +30,7 @@ class Trainer:
         self.maxpush = 3
         self.lr_power = 0.3
         self.lr_base = 1.0
-        self.val_bs = 125
+        self.val_bs = 100
         self.device = torch.device(device)
         self.model.to(device)
 
@@ -161,142 +161,91 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    from Dense_mnist import DenseNet
+    import torch
+
+    from Conv_DogCat import CatDog
+    # from modules.Conv_DogCat import CatDog
+
     from trainer import Trainer
+    # from modules.trainer import Trainer
     from torch.nn import CrossEntropyLoss
     from torchvision import datasets, transforms
-    from torch.utils.data import DataLoader, Subset
-    import numpy as np
+    from torch.utils.data import DataLoader, random_split
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
-    )
 
-    train_dataset = datasets.MNIST(
-        root="C:/Projects/Binary/wwdata",
-        train=True,
-        download=False,
-        transform=transform,
-    )
-    test_dataset = datasets.MNIST(
-        root="C:/Projects/Binary/wwdata",
-        train=False,
-        download=False,
-        transform=transform,
-    )
+    def catdog_datagen(path):
+        """dog:0 cat:1"""
+        transform = transforms.Compose(
+            [
+                transforms.Resize(224),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
+        )
+        dataset = datasets.ImageFolder(root=path, transform=transform)
 
-    y_train = np.array(train_dataset.targets)
+        cat_class_idx = dataset.class_to_idx["cats"]
+        dog_class_idx = dataset.class_to_idx["dogs"]
 
-    idx = np.argsort(y_train)
+        if cat_class_idx < dog_class_idx:
+            dataset.targets = [
+                1 if label == cat_class_idx else 0 for label in dataset.targets
+            ]
+            dataset.class_to_idx["dogs"], dataset.class_to_idx["cats"] = (
+                dataset.class_to_idx["cats"],
+                dataset.class_to_idx["dogs"],
+            )
 
-    vdx = np.array([6000 * i + j for i in range(10) for j in range(5400, 6000)])
-    tdx = np.array([6000 * i + j for i in range(10) for j in range(5400)])
+        return dataset
 
-    train_subset = Subset(train_dataset, indices=idx[tdx])
-    val_subset = Subset(train_dataset, indices=idx[vdx])
 
-    train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_subset, batch_size=64, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+    traval = catdog_datagen("C:/Projects/Binary/wwdata/dogs_vs_cats/train")
+    train_size = int(0.75 * len(traval))
+    val_size = len(traval) - train_size
+    train_dataset, val_dataset = random_split(traval, [train_size, val_size])
+
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+
+    testset = catdog_datagen("C:/Projects/Binary/wwdata/dogs_vs_cats/test")
+    test_loader = DataLoader(testset, batch_size=32, shuffle=False)
+
 
     bw = ba = True
     print(bw, ba)
-    savepath = "C:/Projects/Binary/wwdata/mnist1/binbest1.pth"
+    savepath = "C:/Projects/Binary/wwdata/dogcat/bestbin.pth"
     if bw and not ba:
         mode = "w"
     elif ba and not bw:
         mode = "a"
     else:
         mode = "b"
-    print("mnist, mode: " + mode)
-    model = DenseNet(bw, ba)
-    model.load_state_dict(
-        torch.load(savepath)
-    )
+    print("dogcat, mode: " + mode)
+    model = CatDog(bw, ba)
+    # model.load_state_dict(torch.load(savepath))
     optz = torch.optim.Adam(model.parameters())
     lossfunc = CrossEntropyLoss()
-    trr = Trainer(1000, mode, model, optz, lossfunc,0.95)
-    trr.val_bs = 32
-    trr.lr_power = 0.2
+    trr = Trainer(1000, mode, model, optz, lossfunc, 0.9)
 
-    print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
 
-    if mode == "a":
-        trr.sw_epc = 0
-        trr.lr_base = 1.5
-        trr.lr_power = 0.3
-        model.set_ka(trr.lr_base)
-        trr.train(
-            trainloader=train_loader,
-            valloader=val_loader,
-            max_epochs=8,
-            lnr=1e-3,
-            header="mnist",
-            testloader=test_loader,
-        )
-        model.set_ka(6)
-        trr.train(
-            trainloader=train_loader,
-            valloader=val_loader,
-            max_epochs=3,
-            lnr=1e-3,
-            header="mnist",
-            testloader=test_loader,
-        )
-        model.set_ka(1001)
-        trr.train(
-            trainloader=train_loader,
-            valloader=val_loader,
-            max_epochs=2,
-            lnr=1e-3,
-            header="mnist",
-            testloader=test_loader,
-        )
     if mode == "w":
-        trr.sw_epc = 0
-        trr.lr_base = 3.0
-        model.set_kk(trr.lr_base)
-        trr.train(
-            trainloader=train_loader,
-            valloader=val_loader,
-            max_epochs=8,
-            lnr=1e-3,
-            header="mnist",
-            testloader=test_loader,
-        )
-        for kkz in [10, 20, 50, 100, 300, 500, 999]:
-            model.set_kk(kkz)
-            trr.train(
-                trainloader=train_loader,
-                valloader=val_loader,
-                max_epochs=3,
-                lnr=1e-3,
-                header="mnist",
-                testloader=test_loader,
-            )
-    if mode == "b":
-        trr.sw_epc = 0
-        trr.lr_base = 3.0
-        if model.get_kk().item() < 3:
-            model.set_kk(trr.lr_base)
-        if model.get_ka().item() < 3:
-            model.set_ka(trr.lr_base)
-        trr.train(
-            trainloader=train_loader,
-            valloader=val_loader,
-            max_epochs=8,
-            lnr=1e-3,
-            testloader=test_loader,
-            path=savepath,
-        )
-        # for kkz in [10, 20, 50, 100, 300, 500, 999]:
-        #     model.set_ka(kkz)
-        #     model.set_kk(kkz)
-        #     trr.train(
-        #         trainloader=train_loader,
-        #         valloader=val_loader,
-        #         max_epochs=3,
-        #         lnr=1e-3,
-        #         header="mnist",
-        #         testloader=test_loader,
-        #     )
+        bw = 1
+        ba = 0
+        initLR = 0.1
+        optz = torch.optim.Aedam(model.parameters(), lr=initLR)
+
+    elif mode == "a":
+        bw = 0
+        ba = 1
+        initLR = 0.01
+        optz = torch.optim.Adam(model.parameters(), lr=initLR)
+        trr.lr_power = 0.3
+    elif mode == "b":
+        bw = ba = 1
+        initLR = 0.01
+        optz = torch.optim.Adam(model.parameters(), lr=initLR)
+        trr.lr_power = 0.3
+
+
+    trr.train(trainloader=train_loader,valloader=val_loader,max_epochs=10,lnr=initLR,testloader=test_loader,path=savepath)

@@ -45,7 +45,7 @@ class BinaryConv2D(nn.Module):
                 else torch.sign(self.weight)
             )
 
-        return self.nmk * F.conv2d(x, weight, None, self.num_stride, padding="same")
+        return self.nmk * F.conv2d(x, weight, None, self.num_stride, padding=1)
 
 
 class BinaryConv2DCL(BinaryConv2D):
