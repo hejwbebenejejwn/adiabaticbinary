@@ -1,9 +1,10 @@
-# import modules.layers as layers
-import layers
+import modules.layers as layers
+# import layers
 import torch
 import torch.nn as nn
-# import modules.base as base
-import base
+
+import modules.base as base
+# import base
 
 
 class DenseNet(base.Base):
@@ -37,6 +38,25 @@ class DenseNet(base.Base):
             raise NotImplementedError
         return self.actv1.kk
 
+    def toBin(self):
+        assert self._state == "N", "already binary"
+        if self.binW:
+            self._kknow = torch.clone(self.get_kk()).item()
+            self.set_kk(1e5)
+        if self.binA:
+            self._kanow = torch.clone(self.get_ka()).item()
+            self.set_ka(1e5)
+        self._state = "B"
+        return self._kknow, self._kanow
+
+    def quitBin(self):
+        assert self._state == "B", "not binary"
+        if self.binW:
+            self.set_kk(self._kknow)
+        if self.binA:
+            self.set_ka(self._kanow)
+        self._state = "N"
+
     def forward(self, x: torch.Tensor):
         x = x.view(-1, 28 * 28)
         x = self.dense1(x)
@@ -48,9 +68,4 @@ class DenseNet(base.Base):
 
 if __name__ == "__main__":
     net = DenseNet(True, True)
-    print(net.get_ka())
-    print("ka")
-    print(net.get_kk())
-    print("kk")
-    x = torch.randn(4, 1, 28, 28)
-    print(net(x))
+    net.toBin()
