@@ -2,8 +2,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# import modules.base as base
-import base
+import modules.base as base
+
+# import base
 from torch.utils.data import DataLoader
 
 
@@ -71,7 +72,8 @@ class Trainer:
 
         val_best = 0
         if self.binbest >= self.target_acc:
-            print("already reached")
+            print("\033[91mtarget acc already reached")
+            print("\033[0m")
             return None
 
         for epoch_i in range(max_epochs):
@@ -116,12 +118,14 @@ class Trainer:
                 self.model.quitBin()
                 torch.save(
                     self.model.state_dict(),
-                    path,
+                    path + "binbest.pth",
                 )
             else:
                 self.model.quitBin()
 
             if self.binbest >= self.target_acc:
+                print("\033[91mtarget acc reached")
+                print("\033[0m")
                 break
 
             if self.sw_epc >= self.same_wts_ep:
@@ -130,7 +134,6 @@ class Trainer:
                 print("reduce acc to", val_best)
 
             if vala >= self.target_acc:
-                val_best = 0
                 if self.pmode == "w":
                     for _ in range(self.maxpush):
                         if vala < self.target_acc or self.model.get_kk().item() > 1e3:
@@ -152,11 +155,42 @@ class Trainer:
                 self.optim = torch.optim.Adam(self.model.parameters(), lr=lr)
                 self.sw_epc = 0
 
-            if self.mode == "b" or self.mode == "w":
+            if self.mode == "w":
                 if self.model.get_kk().item() > 1e3:
+                    print("\033[91mweights binaried")
+                    print("\033[0m")
+                    torch.save(
+                        self.model.state_dict(),
+                        path + "binw.pth",
+                    )
                     break
-            if self.mode == "b" or self.mode == "a":
+            if self.mode == "a":
                 if self.model.get_ka().item() > 1e3:
+                    print("\033[91mactivations binaried")
+                    print("\033[0m")
+                    torch.save(
+                        self.model.state_dict(),
+                        path + "bina.pth",
+                    )
+                    break
+            if self.mode == "b":
+                if self.model.get_kk().item() > 1e3:
+                    print("\033[91mweights binaried")
+                    print("\033[0m")
+                    kbin = True
+                else:
+                    kbin = False
+                if self.model.get_ka().item() > 1e3:
+                    print("\033[91mactivations binaried")
+                    print("\033[0m")
+                    abin = True
+                else:
+                    abin = False
+                if kbin and abin:
+                    torch.save(
+                        self.model.state_dict(),
+                        path + "binbest.pth",
+                    )
                     break
 
 
@@ -164,14 +198,15 @@ if __name__ == "__main__":
     import torch
 
     from Conv_DogCat import CatDog
+
     # from modules.Conv_DogCat import CatDog
 
     from trainer import Trainer
+
     # from modules.trainer import Trainer
     from torch.nn import CrossEntropyLoss
     from torchvision import datasets, transforms
     from torch.utils.data import DataLoader, random_split
-
 
     def catdog_datagen(path):
         """dog:0 cat:1"""
@@ -180,7 +215,9 @@ if __name__ == "__main__":
                 transforms.Resize(224),
                 transforms.CenterCrop(224),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
             ]
         )
         dataset = datasets.ImageFolder(root=path, transform=transform)
@@ -199,7 +236,6 @@ if __name__ == "__main__":
 
         return dataset
 
-
     traval = catdog_datagen("C:/Projects/Binary/wwdata/dogs_vs_cats/train")
     train_size = int(0.75 * len(traval))
     val_size = len(traval) - train_size
@@ -211,10 +247,9 @@ if __name__ == "__main__":
     testset = catdog_datagen("C:/Projects/Binary/wwdata/dogs_vs_cats/test")
     test_loader = DataLoader(testset, batch_size=32, shuffle=False)
 
-
     bw = ba = True
     print(bw, ba)
-    savepath = "C:/Projects/Binary/wwdata/dogcat/bestbin.pth"
+    savepath = "C:/Projects/Binary/wwdata/dogcat/"
     if bw and not ba:
         mode = "w"
     elif ba and not bw:
@@ -227,7 +262,6 @@ if __name__ == "__main__":
     optz = torch.optim.Adam(model.parameters())
     lossfunc = CrossEntropyLoss()
     trr = Trainer(1000, mode, model, optz, lossfunc, 0.9)
-
 
     if mode == "w":
         bw = 1
@@ -247,5 +281,11 @@ if __name__ == "__main__":
         optz = torch.optim.Adam(model.parameters(), lr=initLR)
         trr.lr_power = 0.3
 
-
-    trr.train(trainloader=train_loader,valloader=val_loader,max_epochs=10,lnr=initLR,testloader=test_loader,path=savepath)
+    trr.train(
+        trainloader=train_loader,
+        valloader=val_loader,
+        max_epochs=3,
+        lnr=1e-3,
+        testloader=test_loader,
+        path=savepath,
+    )
