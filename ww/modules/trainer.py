@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-
+import wandb
 import modules.base as base
 
 # import base
@@ -17,6 +17,7 @@ class Trainer:
         optim: torch.optim.Adam,
         lossfunc: nn.CrossEntropyLoss,
         targetacc=1,
+        project=None,
         device="cpu",
     ):
         self.model = model
@@ -27,13 +28,16 @@ class Trainer:
         self.sw_epc = 0
         self.mode = mode
         self.pmode = "a" if mode == "a" else "w"
+        if self.mode == "n":
+            self.pmode = self.mode
         self.prto = 1.5
         self.maxpush = 3
         self.lr_power = 0.3
         self.lr_base = 1.0
-        self.val_bs = 100
         self.device = torch.device(device)
         self.model.to(device)
+        self.wandb = None
+        self.project = project
 
     def refresh(self):
         self.target_acc = 1.0
@@ -42,13 +46,17 @@ class Trainer:
 
     def fit(self, trainloader: DataLoader):
         self.model.train()
+        totalloss = 0
         for data, target in trainloader:
             data, target = data.to(self.device), target.to(self.device)
             self.optim.zero_grad()
             output = self.model(data)
             loss = self.lossfunc(output, target)
+            with torch.no_grad():
+                totalloss += loss.item()
             loss.backward()
             self.optim.step()
+        return totalloss
 
     def evaluate(self, val_loader: DataLoader):
         self.model.eval()
@@ -64,7 +72,18 @@ class Trainer:
 
         return correct / total
 
-    def train(self, trainloader, valloader, max_epochs, lnr, testloader, path):
+    def train(
+        self,
+        trainloader,
+        valloader,
+        max_epochs,
+        lnr,
+        testloader,
+        path,
+        notes=None,
+        tags=None,
+    ):
+
         kk_now, ka_now = self.model.toBin()
         self.binbest = self.evaluate(valloader)
         print(f"last binbest:{self.binbest}, ka:{ka_now}, kk:{kk_now}")
@@ -76,12 +95,25 @@ class Trainer:
             print("\033[0m")
             return None
 
+        if self.project:
+            self.wandb = wandb.init(
+                project=self.project, notes=notes, tags=tags, reinit=True
+            )
+            config = self.wandb.config
+            config.lnr = lnr
+            config.bw = int(self.binW)
+            config.ba = int(self.binA)
+            config.maxepoch = max_epochs
+
         for epoch_i in range(max_epochs):
-            lr = (
-                lnr / (self.model.get_kk() / self.lr_base) ** self.lr_power
-                if self.mode == "w"
-                else lnr / (self.model.get_ka() / self.lr_base) ** self.lr_power
-            ).item()
+            if self.mode == "n":
+                lr = lnr
+            else:
+                lr = (
+                    lnr / (self.model.get_kk() / self.lr_base) ** self.lr_power
+                    if self.mode == "w"
+                    else lnr / (self.model.get_ka() / self.lr_base) ** self.lr_power
+                ).item()
             for param_group in self.optim.param_groups:
                 param_group["lr"] = lr
             self.sw_epc += 1
@@ -99,11 +131,11 @@ class Trainer:
                 "vbest",
                 round(val_best, 3),
                 "kk",
-                " " if self.mode == "a" else round(self.model.get_kk().item(), 3),
+                (" " if not self.model.binW else round(self.model.get_kk().item(), 3)),
                 "ka",
-                " " if self.mode == "w" else round(self.model.get_ka().item(), 3),
+                (" " if not self.model.binA else round(self.model.get_ka().item(), 3)),
             )
-            self.fit(trainloader)
+            loss = self.fit(trainloader)
             vala = self.evaluate(valloader)
             val_best = max(vala, val_best)
 
@@ -122,6 +154,19 @@ class Trainer:
                 )
             else:
                 self.model.quitBin()
+
+            if self.wandb:
+                self.wandb.log(
+                    {
+                        "epoch": epoch_i + 1,
+                        "kk": 0 if not self.model.binW else self.model.get_kk(),
+                        "ka": 0 if not self.model.binA else self.model.get_ka(),
+                        "loss": loss,
+                        "val acc": vala,
+                        "val binacc": vbin,
+                        "target acc": self.target_acc,
+                    }
+                )
 
             if self.binbest >= self.target_acc:
                 print("\033[91mtarget acc reached")
