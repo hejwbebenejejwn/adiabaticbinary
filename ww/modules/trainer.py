@@ -35,7 +35,7 @@ class Trainer:
         self.lr_power = 0.3
         self.lr_base = 1.0
         self.device = torch.device(device)
-        self.model.to(device)
+        self.model.to(self.device)
         self.wandb = None
         self.project = project
 
@@ -80,6 +80,7 @@ class Trainer:
         lnr,
         testloader,
         path,
+        name=None,
         notes=None,
         tags=None,
     ):
@@ -97,13 +98,18 @@ class Trainer:
 
         if self.project:
             self.wandb = wandb.init(
-                project=self.project, notes=notes, tags=tags, reinit=True
+                project=self.project,
+                notes=notes,
+                tags=tags,
+                reinit=True,
+                name=name,
+                config={
+                    "lnr": lnr,
+                    "bw": int(self.model.binW),
+                    "ba": int(self.model.binA),
+                    "max epochs": max_epochs,
+                },
             )
-            config = self.wandb.config
-            config.lnr = lnr
-            config.bw = int(self.binW)
-            config.ba = int(self.binA)
-            config.maxepoch = max_epochs
 
         for epoch_i in range(max_epochs):
             if self.mode == "n":
@@ -159,8 +165,8 @@ class Trainer:
                 self.wandb.log(
                     {
                         "epoch": epoch_i + 1,
-                        "kk": 0 if not self.model.binW else self.model.get_kk(),
-                        "ka": 0 if not self.model.binA else self.model.get_ka(),
+                        "kk": 0 if not self.model.binW else round(self.model.get_kk().item(), 3),
+                        "ka": 0 if not self.model.binA else round(self.model.get_kk().item(), 3),
                         "loss": loss,
                         "val acc": vala,
                         "val binacc": vbin,
@@ -179,6 +185,7 @@ class Trainer:
                 print("reduce acc to", val_best)
 
             if vala >= self.target_acc:
+                val_best=0
                 if self.pmode == "w":
                     for _ in range(self.maxpush):
                         if vala < self.target_acc or self.model.get_kk().item() > 1e3:
@@ -237,6 +244,9 @@ class Trainer:
                         path + "binbest.pth",
                     )
                     break
+        if self.wandb:
+            self.wandb.finish()
+            self.wandb = None
 
 
 if __name__ == "__main__":

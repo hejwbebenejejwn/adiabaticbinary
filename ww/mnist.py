@@ -42,7 +42,7 @@ test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 bw=ba=False
 print(bw, ba)
-savepath = "D:/usr14/project/Binary/wwdata/mnist1/binbest1.pth"
+savepath = "D:/usr14/project/Binary/wwdata/mnist1/fullbest.pth"
 if bw and not ba:
     mode = "w"
 elif ba and not bw:
@@ -57,10 +57,34 @@ model = DenseNet(bw, ba)
 # )
 optz = torch.optim.Adam(model.parameters())
 lossfunc = CrossEntropyLoss()
-trr = Trainer(100, mode, model, optz, lossfunc,0.98,"full precision")
+device='cuda' if torch.cuda.is_available() else 'cpu'
+trr = Trainer(100, mode, model, optz, lossfunc,0.98,"mnist",device)
 
 print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
-trr.train(train_loader,val_loader,500,1e-3,test_loader,savepath,"training of full precision")
+trr.train(train_loader,val_loader,500,1e-3,test_loader,savepath,"full precision")
+
+bw=True
+ba=False
+print(bw, ba)
+savepath = "D:/usr14/project/Binary/wwdata/mnist1/binwbest.pth"
+if bw and not ba:
+    mode = "w"
+elif ba and not bw:
+    mode = "a"
+else:
+    mode = "b"
+print("mnist, mode: " + mode)
+model = DenseNet(bw, ba)
+# model.load_state_dict(
+#     torch.load(savepath)
+# )
+optz = torch.optim.Adam(model.parameters())
+lossfunc = CrossEntropyLoss()
+device='cuda' if torch.cuda.is_available() else 'cpu'
+trr = Trainer(100, mode, model, optz, lossfunc,0.98,"mnist",device)
+
+print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
+trr.train(train_loader,val_loader,1000,1e-3,test_loader,savepath,"binW")
 
 
 # if mode == "a":
