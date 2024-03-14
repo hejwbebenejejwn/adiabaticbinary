@@ -36,9 +36,9 @@ tdx = np.array([6000 * i + j for i in range(10) for j in range(5400)])
 train_subset = Subset(train_dataset, indices=idx[tdx])
 val_subset = Subset(train_dataset, indices=idx[vdx])
 
-train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
-val_loader = DataLoader(val_subset, batch_size=64, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+train_loader = DataLoader(train_subset, batch_size=128, shuffle=True)
+val_loader = DataLoader(val_subset, batch_size=128, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
 bw=ba=False
 print(bw, ba)
