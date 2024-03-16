@@ -30,13 +30,24 @@ class Base(nn.Module, ABC):
     def get_ka(self) -> nn.parameter.Parameter:
         pass
 
-    @abstractmethod
     def toBin(self):
-        pass
+        assert self._state == "N", "already binary"
+        if self.binW:
+            self._kknow = torch.clone(self.get_kk()).item()
+            self.set_kk(1e5)
+        if self.binA:
+            self._kanow = torch.clone(self.get_ka()).item()
+            self.set_ka(1e5)
+        self._state = "B"
+        return self._kknow, self._kanow
 
-    @abstractmethod
     def quitBin(self):
-        pass
+        assert self._state == "B", "not binary"
+        if self.binW:
+            self.set_kk(self._kknow)
+        if self.binA:
+            self.set_ka(self._kanow)
+        self._state = "N"
 
     @abstractmethod
     def forward(self, x: torch.Tensor):
