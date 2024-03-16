@@ -1,34 +1,34 @@
 import torch
 import torch.nn as nn
-# import modules.layers as layers
-import layers
-# from modules.base import Base
-from base import Base
+import modules.layers as layers
+# import layers
+from modules.base import Base
+# from base import Base
 import torch.nn.functional as F
 
 class ResNet20(Base):
     """todo: add L2 regulation manually,dense args"""
     def __init__(self, binW, binA):
         super().__init__(binW, binA)
-        self.conv01= layers.BinaryConv2DCL(3,16) if binW else nn.Conv2d(3,16,3,bias=False)
-        self.conv02= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv03= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv04= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv05= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv06= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv07= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv08= layers.BinaryConv2DCL(16,32) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv09= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv10= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv11= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv12= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv13= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv14= layers.BinaryConv2DCL(32,64) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv15= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv16= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv17= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv18= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(16,16,3,bias=False)
-        self.conv19= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(16,16,3,bias=False)
+        self.conv01= layers.BinaryConv2DCL(3,16) if binW else nn.Conv2d(3,16,3,padding=1,bias=False)
+        self.conv02= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,padding=1,bias=False)
+        self.conv03= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,padding=1,bias=False)
+        self.conv04= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,padding=1,bias=False)
+        self.conv05= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,padding=1,bias=False)
+        self.conv06= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,padding=1,bias=False)
+        self.conv07= layers.BinaryConv2DCL(16,16) if binW else nn.Conv2d(16,16,3,padding=1,bias=False)
+        self.conv08= layers.BinaryConv2DCL(16,32) if binW else nn.Conv2d(16,32,3,padding=1,bias=False)
+        self.conv09= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(32,32,3,padding=1,bias=False)
+        self.conv10= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(32,32,3,padding=1,bias=False)
+        self.conv11= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(32,32,3,padding=1,bias=False)
+        self.conv12= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(32,32,3,padding=1,bias=False)
+        self.conv13= layers.BinaryConv2DCL(32,32) if binW else nn.Conv2d(32,32,3,padding=1,bias=False)
+        self.conv14= layers.BinaryConv2DCL(32,64) if binW else nn.Conv2d(32,64,3,padding=1,bias=False)
+        self.conv15= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(64,64,3,padding=1,bias=False)
+        self.conv16= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(64,64,3,padding=1,bias=False)
+        self.conv17= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(64,64,3,padding=1,bias=False)
+        self.conv18= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(64,64,3,padding=1,bias=False)
+        self.conv19= layers.BinaryConv2DCL(64,64) if binW else nn.Conv2d(64,64,3,padding=1,bias=False)
         self.avgpool=nn.AdaptiveAvgPool2d((1,1))
         self.dense=layers.BinaryDense(64,10) if binW else nn.Linear(64,10)
         self.actv01=layers.BinaryActivation(False) if binA else nn.ReLU()
