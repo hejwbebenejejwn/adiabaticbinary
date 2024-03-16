@@ -1,48 +1,38 @@
 import torch
-# from Dense_mnist import DenseNet
-from modules.Dense_mnist import DenseNet
-# from trainer import Trainer
-from modules.trainer import Trainer
+import torchvision
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader,random_split
 from torch.nn import CrossEntropyLoss
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Subset
 import numpy as np
-import wandb
+from modules.Resnet import ResNet20
+from modules.trainer import Trainer
 
 transform = transforms.Compose(
-    [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
-)
+    [transforms.ToTensor(),
+     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-train_dataset = datasets.MNIST(
-    root="D:/usr14/project/Binary/wwdata",
-    train=True,
-    download=False,
-    transform=transform,
-)
-test_dataset = datasets.MNIST(
-    root="D:/usr14/project/Binary/wwdata",
-    train=False,
-    download=False,
-    transform=transform,
-)
+trainset = torchvision.datasets.CIFAR10(root='/d/usr14/project/Binary/wwdata', train=True,
+                                        download=False, transform=transform)
+train_size = 45000
+val_size = 5000
+train_dataset, val_dataset = random_split(trainset, [train_size, val_size])
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128,
+                                          shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
-y_train = np.array(train_dataset.targets)
+testset = torchvision.datasets.CIFAR10(root='/d/usr14/project/Binary/wwdata', train=False,
+                                       download=False, transform=transform)
 
-idx = np.argsort(y_train)
+test_loader = torch.utils.data.DataLoader(testset, batch_size=128,
+                                         shuffle=False)
 
-vdx = np.array([6000 * i + j for i in range(10) for j in range(5400, 6000)])
-tdx = np.array([6000 * i + j for i in range(10) for j in range(5400)])
+classes = ('plane', 'car', 'bird', 'cat',
+           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-train_subset = Subset(train_dataset, indices=idx[tdx])
-val_subset = Subset(train_dataset, indices=idx[vdx])
-
-train_loader = DataLoader(train_subset, batch_size=128, shuffle=True)
-val_loader = DataLoader(val_subset, batch_size=128, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
 bw=ba=False
 print(bw, ba)
-savepath = "D:/usr14/project/Binary/wwdata/mnist1/fullbest.pth"
+savepath = "D:/usr14/project/Binary/wwdata/cifa10/fullbest.pth"
 if bw and not ba:
     mode = "w"
 elif ba and not bw:
@@ -51,14 +41,15 @@ else:
     mode = "b"
 mode="n"
 print("mnist, mode: " + mode)
-model = DenseNet(bw, ba)
+model = ResNet20(bw, ba)
 # model.load_state_dict(
 #     torch.load(savepath)
 # )
 optz = torch.optim.Adam(model.parameters())
 lossfunc = CrossEntropyLoss()
 device='cuda' if torch.cuda.is_available() else 'cpu'
-trr = Trainer(100, mode, model, optz, lossfunc,0.98,"mnist",device)
+print(f"device {device}")
+trr = Trainer(100, mode, model, optz, lossfunc,0.98,"cifar10",device)
 
 print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
 trr.train(train_loader,val_loader,500,1e-3,test_loader,savepath,"full precision")
@@ -66,7 +57,7 @@ trr.train(train_loader,val_loader,500,1e-3,test_loader,savepath,"full precision"
 bw=True
 ba=False
 print(bw, ba)
-savepath = "D:/usr14/project/Binary/wwdata/mnist1/binwbest.pth"
+savepath = "D:/usr14/project/Binary/wwdata/cifa10/binwbest.pth"
 if bw and not ba:
     mode = "w"
 elif ba and not bw:
@@ -74,14 +65,14 @@ elif ba and not bw:
 else:
     mode = "b"
 print("mnist, mode: " + mode)
-model = DenseNet(bw, ba)
+model = ResNet20(bw, ba)
 # model.load_state_dict(
 #     torch.load(savepath)
 # )
 optz = torch.optim.Adam(model.parameters())
 lossfunc = CrossEntropyLoss()
 device='cuda' if torch.cuda.is_available() else 'cpu'
-trr = Trainer(100, mode, model, optz, lossfunc,0.98,"mnist",device)
+trr = Trainer(50, mode, model, optz, lossfunc,0.98,"cifar10",device)
 
 print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
 trr.train(train_loader,val_loader,1000,1e-3,test_loader,savepath,"binW")

@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-# import modules.layers as layers
-import layers
-# from modules.base import Base
-from base import Base
+import modules.layers as layers
+# import layers
+from modules.base import Base
+# from base import Base
 import torch.nn.functional as F
 
 class ResNet20(Base):
