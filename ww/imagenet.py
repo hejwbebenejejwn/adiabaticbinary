@@ -7,32 +7,27 @@ import numpy as np
 from modules.ResNet import ResNet20
 from modules.trainer import Trainer
 
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+data_dir='D:/usr14/project/Binary/imagenet1/train'
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # 归一化
+])
 
-trainset = torchvision.datasets.CIFAR10(root='/d/usr14/project/Binary/wwdata', train=True,
-                                        download=False, transform=transform)
-train_size = 45000
-val_size = 5000
-train_dataset, val_dataset = random_split(trainset, [train_size, val_size])
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128,
-                                          shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
+dataset=torchvision.datasets.ImageFolder(root=data_dir,transform=transform)
+train_size = int(0.6 * len(dataset))
+val_size = int(0.2 * len(dataset))
+test_size=len(dataset)-train_size-val_size
 
-testset = torchvision.datasets.CIFAR10(root='/d/usr14/project/Binary/wwdata', train=False,
-                                       download=False, transform=transform)
+train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
 
-test_loader = torch.utils.data.DataLoader(testset, batch_size=128,
-                                         shuffle=False)
-
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
 bw=ba=False
 print(bw, ba)
-savepath = "D:/usr14/project/Binary/wwdata/cifa10/fullbest.pth"
+savepath = "D:/usr14/project/Binary/wwdata/imagenet/fullbest.pth"
 if bw and not ba:
     mode = "w"
 elif ba and not bw:
@@ -45,19 +40,19 @@ model = ResNet20(bw, ba)
 # model.load_state_dict(
 #     torch.load(savepath)
 # )
-optz = torch.optim.Adam(model.parameters())
+optz = torch.optim.Adam(model.parameters(),lr=0.01)
 lossfunc = CrossEntropyLoss()
 device='cuda' if torch.cuda.is_available() else 'cpu'
 print(f"device {device}")
-trr = Trainer(500, mode, model, True, optz, lossfunc,0.98,"cifar11",device)
+trr = Trainer(10000, mode, model, optz, lossfunc,0.98,"imagenet",device)
 
 print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
-trr.train(train_loader,val_loader,500,1e-3,test_loader,savepath,"full precision")
+trr.train(train_loader,val_loader,200,1e-3,test_loader,savepath,"full precision")
 
 bw=True
 ba=False
 print(bw, ba)
-savepath = "D:/usr14/project/Binary/wwdata/cifa10/binwbest.pth"
+savepath = "D:/usr14/project/Binary/wwdata/imagenet/binwbest.pth"
 if bw and not ba:
     mode = "w"
 elif ba and not bw:
@@ -69,13 +64,13 @@ model = ResNet20(bw, ba)
 # model.load_state_dict(
 #     torch.load(savepath)
 # )
-optz = torch.optim.Adam(model.parameters())
+optz = torch.optim.Adam(model.parameters(),lr=0.01)
 lossfunc = CrossEntropyLoss()
 device='cuda' if torch.cuda.is_available() else 'cpu'
-trr = Trainer(50, mode, model, True, optz, lossfunc,0.98,"cifar11",device)
+trr = Trainer(50, mode, model, optz, lossfunc,1,"imagenet",device)
 
 print(f"initial accuracy:{trr.evaluate(val_loader=val_loader)}")
-trr.train(train_loader,val_loader,1000,1e-3,test_loader,savepath,"binW")
+trr.train(train_loader,val_loader,500,1e-3,test_loader,savepath,"binW")
 
 
 # if mode == "a":
