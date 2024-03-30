@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 import modules.layers as layers
+
 # import layers
 from modules.base import Base
+
 # from base import Base
 import torch.nn.functional as F
 
@@ -10,16 +12,29 @@ import torch.nn.functional as F
 class Block(nn.Module):
     def __init__(
         self,
+        binW,
+        binA,
         in_channel,
         out_channel,
         stride=1,
         downsample=None,
     ):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channel, out_channel, 3, stride, 1, bias=False)
+        self.binW=binW
+        self.binA=binA
+        self.conv1 = (
+            nn.Conv2d(in_channel, out_channel, 3, stride, 1, bias=False)
+            if not binW
+            else layers.BinaryConv2D(in_channel, out_channel, 3, stride)
+        )
         self.bn1 = nn.BatchNorm2d(out_channel)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_channel, out_channel, 3, 1, 1, bias=False)
+        self.conv2 = (
+            nn.Conv2d(out_channel, out_channel, 3, 1, 1, bias=False)
+            if not binW
+            else layers.BinaryConv2D(out_channel, out_channel)
+        )
+
         self.bn2 = nn.BatchNorm2d(out_channel)
         self.downsample = downsample
         self.stride = stride
@@ -39,11 +54,10 @@ class Block(nn.Module):
 
 
 class ResNet(Base):
-    def __init__(self, binW, binA):
+    def __init__(self, binW, binA=False):
         super().__init__(binW, binA)
-        self.in_channel = 64
         self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(self.in_channel)
+        self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.block1 = self._resblock(64, 64, 2)
         self.block2 = self._resblock(64, 128, 2, 2)
@@ -53,7 +67,7 @@ class ResNet(Base):
         self.fc = nn.Linear(512, 10)
 
         for mod in self.modules():
-            if isinstance(mod, nn.Conv2d):
+            if isinstance(mod, (nn.Conv2d, layers.BinaryConv2D)):
                 nn.init.kaiming_normal_(mod.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(mod, nn.BatchNorm2d):
                 nn.init.constant_(mod.weight, 1)
@@ -62,22 +76,35 @@ class ResNet(Base):
     def _resblock(self, in_channel, out_channel, blocks, stride=1):
         downsample = None
         if stride != 1 or in_channel != out_channel:
-            downsample = nn.Sequential(
-                nn.Conv2d(in_channel, out_channel, 1, stride, bias=False),
-                nn.BatchNorm2d(out_channel),
+            downsample = (
+                nn.Sequential(
+                    nn.Conv2d(in_channel, out_channel, 1, stride, bias=False),
+                    nn.BatchNorm2d(out_channel),
+                )
+                if not self.binW
+                else nn.Sequential(
+                        layers.BinaryConv2D(
+                            in_channel, out_channel, 1, stride, padding=0
+                        ),
+                        nn.BatchNorm2d(out_channel),
+                )
             )
 
-        layers = []
-        layers.append(Block(in_channel, out_channel, stride, downsample))
+        boks = []
+        boks.append(
+            Block(self.binW, self.binA, in_channel, out_channel, stride, downsample)
+        )
         for _ in range(1, blocks):
-            layers.append(
+            boks.append(
                 Block(
+                    self.binW,
+                    self.binA,
                     out_channel,
                     out_channel,
                 )
             )
 
-        return nn.Sequential(*layers)
+        return nn.Sequential(*boks)
 
     def forward(self, x: torch.Tensor):
         x = self.conv1(x)
@@ -94,20 +121,9 @@ class ResNet(Base):
 
         return self.fc(x)
 
-    def set_kk():
-        pass
-
-    def set_ka():
-        pass
-
-    def get_kk():
-        pass
-
-    def get_ka():
-        pass
 
 
 if __name__ == "__main__":
-    model=ResNet(0,0)
-    x=torch.rand(3,3,32,32)
-    y=model(x)
+    model = ResNet(0, 0)
+    x = torch.rand(3, 3, 32, 32)
+    y = model(x)

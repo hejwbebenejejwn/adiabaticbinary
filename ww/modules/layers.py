@@ -5,13 +5,14 @@ import torch.nn.functional as F
 
 class BinaryConv2D(nn.Module):
     def __init__(
-        self, in_channel, out_channel, ker_size=3, num_stride=1, ker_bias=False
+        self, in_channel, out_channel, ker_size=3, num_stride=1, padding=1, ker_bias=False
     ):
         super(BinaryConv2D, self).__init__()
         self.in_channel = in_channel
         self.out_channel = out_channel
         self.ker_size = ker_size
         self.num_stride = num_stride
+        self.padding=padding
 
         self.weight = nn.Parameter(
             torch.Tensor(out_channel, in_channel, ker_size, ker_size)
@@ -45,7 +46,7 @@ class BinaryConv2D(nn.Module):
                 else torch.sign(self.weight)
             )
 
-        return self.nmk * F.conv2d(x, weight, None, self.num_stride, padding=1)
+        return self.nmk * F.conv2d(x, weight, None, self.num_stride, self.padding)
 
 
 class BinaryConv2DCL(BinaryConv2D):

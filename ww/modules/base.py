@@ -8,35 +8,55 @@ class Base(nn.Module, ABC):
         super(Base, self).__init__()
         self.binW = binW
         self.binA = binA
-        self.kk = None
-        self.ka = None
         self._kanow = None
         self._kknow = None
         self._state = "N"
 
-    @abstractmethod
     def set_kk(self, kka):
-        pass
+        if not self.binW:
+            raise NotImplementedError
+        for mod in self.modules():
+            if hasattr(mod, "kk"):
+                mod.set_kk(kka)
 
-    @abstractmethod
     def set_ka(self, kka):
-        pass
+        if not self.binA:
+            raise NotImplementedError
+        for mod in self.modules():
+            if hasattr(mod, "ka"):
+                mod.set_ka(kka)
 
-    @abstractmethod
-    def get_kk(self) -> nn.parameter.Parameter:
-        pass
+    def get_kk(self):
+        if not self.binW:
+            raise NotImplementedError
+        met = False
+        for mod in self.modules():
+            if hasattr(mod, "kk"):
+                if not met:
+                    met = True
+                    kkk = mod.kk.item()
+                assert kkk == mod.kk.item(), "kk not aligned"
+        return kkk
 
-    @abstractmethod
-    def get_ka(self) -> nn.parameter.Parameter:
-        pass
+    def get_ka(self):
+        if not self.binA:
+            raise NotImplementedError
+        met = False
+        for mod in self.modules():
+            if hasattr(mod, "ka"):
+                if not met:
+                    met = True
+                    kka = mod.ka.item()
+                assert kka == mod.ka.item(), "ka not aligned"
+        return kka
 
     def toBin(self):
         assert self._state == "N", "already binary"
         if self.binW:
-            self._kknow = torch.clone(self.get_kk()).item()
+            self._kknow = self.get_kk()
             self.set_kk(1e5)
         if self.binA:
-            self._kanow = torch.clone(self.get_ka()).item()
+            self._kanow = self.get_ka()
             self.set_ka(1e5)
         self._state = "B"
         return self._kknow, self._kanow
