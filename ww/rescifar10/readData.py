@@ -3,7 +3,7 @@ import numpy as np
 from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data.sampler import SubsetRandomSampler
-from cutout import Cutout
+from modules.cutout import Cutout
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 num_workers = 0

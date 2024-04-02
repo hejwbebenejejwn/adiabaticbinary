@@ -3,6 +3,7 @@ import numpy as np
 from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data.sampler import SubsetRandomSampler
+from modules.cutout import Cutout
 
 def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,pic_path='D:/usr14/project/Binary/imagenet1/subset'):
     """
@@ -12,11 +13,11 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,pic_path='D:/usr14/p
     pic_path: The path of the pictrues
     """
     transform_train = transforms.Compose([
-        # transforms.RandomCrop(32, padding=4), 
-        # transforms.RandomHorizontalFlip(), 
-        transforms.Resize((224, 224)),
+        transforms.RandomCrop(224, padding=4), 
+        transforms.RandomHorizontalFlip(), 
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]), 
+        Cutout(1,32)
     ])
 
     transform_test = transforms.Compose([

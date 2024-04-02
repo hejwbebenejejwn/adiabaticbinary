@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 class Cutout(object):
     """
     Args:
