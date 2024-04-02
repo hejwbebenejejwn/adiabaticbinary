@@ -13,20 +13,23 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,pic_path='D:/usr14/p
     pic_path: The path of the pictrues
     """
     transform_train = transforms.Compose([
+        transforms.Resize((224,224)),
         transforms.RandomCrop(224, padding=4), 
         transforms.RandomHorizontalFlip(), 
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]), 
-        Cutout(1,32)
+        Cutout(1,64)
     ])
 
     transform_test = transforms.Compose([
+        transforms.Resize((224,224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
     ])
 
 
     dataset=datasets.ImageFolder(pic_path,transform_train)
+    valset=datasets.ImageFolder(pic_path,transform_test)
 
     num_samples=len(dataset)
     indices=list(range(num_samples))
@@ -38,9 +41,9 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,pic_path='D:/usr14/p
     test_sampler=SubsetRandomSampler(test_idx)
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
         sampler=train_sampler, num_workers=num_workers)
-    valid_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, 
+    valid_loader = torch.utils.data.DataLoader(valset, batch_size=batch_size, 
         sampler=val_sampler, num_workers=num_workers)
-    test_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, 
+    test_loader = torch.utils.data.DataLoader(valset, batch_size=batch_size, 
         sampler=test_sampler, num_workers=num_workers)
 
 
