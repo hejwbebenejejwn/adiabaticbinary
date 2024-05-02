@@ -54,7 +54,7 @@ class Block(nn.Module):
 
 
 class ResNet(Base):
-    def __init__(self, binW, binA=False):
+    def __init__(self, binW, num_class=10,binA=False):
         super().__init__(binW, binA)
         self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
@@ -64,7 +64,7 @@ class ResNet(Base):
         self.block3 = self._resblock(128, 256, 2, 2)
         self.block4 = self._resblock(256, 512, 2, 2)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512, 10)
+        self.fc = nn.Linear(512, num_class)
 
         for mod in self.modules():
             if isinstance(mod, (nn.Conv2d, layers.BinaryConv2D)):
