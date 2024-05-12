@@ -18,7 +18,7 @@ from binary_llama import BinaryLlama, BinaryTransformer
 from datasets import TokenizedDataset
 
 torch.set_float32_matmul_precision('medium')
-wandb.login(key='97de44e121f8da39ef1b862d3c94ba1157f970b1')
+wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
 
 rank = int(os.environ["RANK"])
 local_rank = int(os.environ["LOCAL_RANK"])
