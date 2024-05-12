@@ -250,8 +250,8 @@ class BinaryColumnParallelLinear(torch.nn.Module):
             self.register_parameter("bias", None)
 
         # Definition of binarize training parameters: kk and aa
-        self.kk = Parameter(torch.tensor([1.]), requires_grad=False)
-        self.aa = Parameter(torch.tensor([1.]), requires_grad=False)
+        self.kk = Parameter(torch.tensor(1.), requires_grad=False)
+        self.aa = Parameter(torch.tensor(1.), requires_grad=False)
 
         # Initialize weight.
         self.master_weight = _initialize_affine_weight(
@@ -369,8 +369,8 @@ class BinaryRowParallelLinear(torch.nn.Module):
             self.register_parameter("bias", None)
 
         # Definition of binarize training parameters: kk and aa
-        self.kk = Parameter(torch.tensor([1.]), requires_grad=False)
-        self.aa = Parameter(torch.tensor([1.]), requires_grad=False)
+        self.kk = Parameter(torch.tensor(1.), requires_grad=False)
+        self.aa = Parameter(torch.tensor(1.), requires_grad=False)
 
         # Initialize weight.
         self.master_weight = _initialize_affine_weight(

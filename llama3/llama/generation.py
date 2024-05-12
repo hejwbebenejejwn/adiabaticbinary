@@ -114,6 +114,16 @@ class Llama:
         self.formatter = ChatFormat(tokenizer)
 
     @torch.inference_mode()
+    def gen(self, prompt_tokens: torch.IntTensor, temperature: float = 0.6,  logprobs: bool = False)\
+            -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        prev_pos = 0
+        tokens = prompt_tokens.to(dtype=torch.int32)
+        logits = self.model.forward(tokens, prev_pos)
+        probs = torch.softmax(logits / temperature, dim=-1, dtype=torch.float16)
+
+        return logits, probs if logprobs else None
+
+    @torch.inference_mode()
     def generate(
         self,
         prompt_tokens: List[List[int]],
@@ -122,7 +132,7 @@ class Llama:
         top_p: float = 0.9,
         logprobs: bool = False,
         echo: bool = False,
-    ) -> Tuple[List[List[int]], Optional[List[List[float]]]]:
+    ) -> Tuple[List[List[int]], Optional[List[List[float]]], Optional[List[torch.Tensor]]]:
         """
         Generate text sequences based on provided prompts using the language generation model.
 
@@ -142,6 +152,8 @@ class Llama:
             If logprobs is True, token log probabilities are computed for each generated token.
 
         """
+        if max_gen_len is None:
+            max_gen_len = 0
         params = self.model.params
         bsz = len(prompt_tokens)
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
@@ -172,10 +184,12 @@ class Llama:
 
         stop_tokens = torch.tensor(list(self.tokenizer.stop_tokens))
 
+        prob_list = []
         for cur_pos in range(min_prompt_len, total_len):
             logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
             if temperature > 0:
                 probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
+                prob_list.append(probs)
                 next_token = sample_top_p(probs, top_p)
             else:
                 next_token = torch.argmax(logits[:, -1], dim=-1)
@@ -220,7 +234,7 @@ class Llama:
                     pass
             out_tokens.append(toks)
             out_logprobs.append(probs)
-        return (out_tokens, out_logprobs if logprobs else None)
+        return out_tokens, out_logprobs if logprobs else None, prob_list if logprobs else None
 
     def text_completion(
         self,
@@ -254,7 +268,7 @@ class Llama:
         if max_gen_len is None:
             max_gen_len = self.model.params.max_seq_len - 1
         prompt_tokens = [self.tokenizer.encode(x, bos=True, eos=False) for x in prompts]
-        generation_tokens, generation_logprobs = self.generate(
+        generation_tokens, generation_logprobs, _ = self.generate(
             prompt_tokens=prompt_tokens,
             max_gen_len=max_gen_len,
             temperature=temperature,
@@ -306,7 +320,7 @@ class Llama:
         prompt_tokens = [
             self.formatter.encode_dialog_prompt(dialog) for dialog in dialogs
         ]
-        generation_tokens, generation_logprobs = self.generate(
+        generation_tokens, generation_logprobs, _ = self.generate(
             prompt_tokens=prompt_tokens,
             max_gen_len=max_gen_len,
             temperature=temperature,

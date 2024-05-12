@@ -294,7 +294,6 @@ class BinaryTransformer(nn.Module):
             layer.feed_forward.w3.set_kk_stage2(ratio)
         self.output.set_kk_stage2(ratio)
 
-    @torch.inference_mode()
     def forward(self, tokens: torch.Tensor, start_pos: int):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)

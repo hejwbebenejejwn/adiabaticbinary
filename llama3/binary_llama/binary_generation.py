@@ -33,13 +33,13 @@ class ChatPrediction(TypedDict, total=False):
 class BinaryLlama:
     @staticmethod
     def build(
-        ckpt_dir: str,
-        tokenizer_path: str,
-        max_seq_len: int,
-        max_batch_size: int,
-        model_parallel_size: Optional[int] = None,
-        seed: int = 1,
-    ) -> "Llama":
+            ckpt_dir: str,
+            tokenizer_path: str,
+            max_seq_len: int,
+            max_batch_size: int,
+            model_parallel_size: Optional[int] = None,
+            seed: int = 1,
+    ) -> "BinaryLlama":
         """
         Build a Llama instance by initializing and loading a model checkpoint.
 
@@ -111,16 +111,23 @@ class BinaryLlama:
         self.tokenizer = tokenizer
         self.formatter = ChatFormat(tokenizer)
 
-    @torch.inference_mode()
+    def gen(self, prompt_tokens: torch.IntTensor, temperature: float = 0.6,  logprobs: bool = False)\
+            -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        prev_pos = 0
+        logits = self.model.forward(prompt_tokens, prev_pos)
+        probs = torch.softmax(logits / temperature, dim=-1, dtype=torch.float16)
+
+        return logits, probs if logprobs else None
+
     def generate(
-        self,
-        prompt_tokens: List[List[int]],
-        max_gen_len: int,
-        temperature: float = 0.6,
-        top_p: float = 0.9,
-        logprobs: bool = False,
-        echo: bool = False,
-    ) -> Tuple[List[List[int]], Optional[List[List[float]]]]:
+            self,
+            prompt_tokens: List[List[int]],
+            max_gen_len: int,
+            temperature: float = 0.6,
+            top_p: float = 0.9,
+            logprobs: bool = False,
+            echo: bool = False,
+    ) -> Tuple[List[List[int]], Optional[List[List[float]]], Optional[List[torch.Tensor]]]:
         """
         Generate text sequences based on provided prompts using the language generation model.
 
@@ -140,6 +147,8 @@ class BinaryLlama:
             If logprobs is True, token log probabilities are computed for each generated token.
 
         """
+        if max_gen_len is None:
+            max_gen_len = self.model.params.max_seq_len - 1
         params = self.model.params
         bsz = len(prompt_tokens)
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
@@ -170,10 +179,12 @@ class BinaryLlama:
 
         stop_tokens = torch.tensor(list(self.tokenizer.stop_tokens))
 
+        prob_list = []
         for cur_pos in range(min_prompt_len, total_len):
             logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
             if temperature > 0:
                 probs = torch.softmax(logits[:, -1] / temperature, dim=-1)
+                prob_list.append(probs)
                 next_token = sample_top_p(probs, top_p)
             else:
                 next_token = torch.argmax(logits[:, -1], dim=-1)
@@ -185,9 +196,9 @@ class BinaryLlama:
             )
             tokens[:, cur_pos] = next_token
             if logprobs:
-                token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
+                token_logprobs[:, prev_pos + 1: cur_pos + 1] = -F.cross_entropy(
                     input=logits.transpose(1, 2),
-                    target=tokens[:, prev_pos + 1 : cur_pos + 1],
+                    target=tokens[:, prev_pos + 1: cur_pos + 1],
                     reduction="none",
                     ignore_index=pad_id,
                 )
@@ -204,10 +215,10 @@ class BinaryLlama:
         for i, toks in enumerate(tokens.tolist()):
             # cut to max gen len
             start = 0 if echo else len(prompt_tokens[i])
-            toks = toks[start : len(prompt_tokens[i]) + max_gen_len]
+            toks = toks[start: len(prompt_tokens[i]) + max_gen_len]
             probs = None
             if logprobs:
-                probs = token_logprobs[i][start : len(prompt_tokens[i]) + max_gen_len]
+                probs = token_logprobs[i][start: len(prompt_tokens[i]) + max_gen_len]
             # cut to after eos tok if any
             for stop_token in self.tokenizer.stop_tokens:
                 try:
@@ -218,16 +229,16 @@ class BinaryLlama:
                     pass
             out_tokens.append(toks)
             out_logprobs.append(probs)
-        return (out_tokens, out_logprobs if logprobs else None)
+        return out_tokens, out_logprobs if logprobs else None, prob_list if logprobs else None
 
     def text_completion(
-        self,
-        prompts: List[str],
-        temperature: float = 0.6,
-        top_p: float = 0.9,
-        max_gen_len: Optional[int] = None,
-        logprobs: bool = False,
-        echo: bool = False,
+            self,
+            prompts: List[str],
+            temperature: float = 0.6,
+            top_p: float = 0.9,
+            max_gen_len: Optional[int] = None,
+            logprobs: bool = False,
+            echo: bool = False,
     ) -> List[CompletionPrediction]:
         """
         Perform text completion for a list of prompts using the language generation model.
@@ -252,7 +263,7 @@ class BinaryLlama:
         if max_gen_len is None:
             max_gen_len = self.model.params.max_seq_len - 1
         prompt_tokens = [self.tokenizer.encode(x, bos=True, eos=False) for x in prompts]
-        generation_tokens, generation_logprobs = self.generate(
+        generation_tokens, generation_logprobs, _ = self.generate(
             prompt_tokens=prompt_tokens,
             max_gen_len=max_gen_len,
             temperature=temperature,
@@ -272,12 +283,12 @@ class BinaryLlama:
         return [{"generation": self.tokenizer.decode(t)} for t in generation_tokens]
 
     def chat_completion(
-        self,
-        dialogs: List[Dialog],
-        temperature: float = 0.6,
-        top_p: float = 0.9,
-        max_gen_len: Optional[int] = None,
-        logprobs: bool = False,
+            self,
+            dialogs: List[Dialog],
+            temperature: float = 0.6,
+            top_p: float = 0.9,
+            max_gen_len: Optional[int] = None,
+            logprobs: bool = False,
     ) -> List[ChatPrediction]:
         """
         Generate assistant responses for a list of conversational dialogs using the language generation model.
@@ -304,7 +315,7 @@ class BinaryLlama:
         prompt_tokens = [
             self.formatter.encode_dialog_prompt(dialog) for dialog in dialogs
         ]
-        generation_tokens, generation_logprobs = self.generate(
+        generation_tokens, generation_logprobs, _ = self.generate(
             prompt_tokens=prompt_tokens,
             max_gen_len=max_gen_len,
             temperature=temperature,
