@@ -14,7 +14,7 @@ git lfs install
 ```
 * Install python packages
 ```bash
-cd path/to/project/binary_llama3
+cd path/to/project/binary_llama
 pip install -r requirements.txt
 ```
 
