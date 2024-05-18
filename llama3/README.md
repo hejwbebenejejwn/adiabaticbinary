@@ -35,6 +35,7 @@ python prepare_slimpajama.py
 
 * Download Pre-trained Model Weights:
 ```bash
+cd path/to/project/llama3/models
 huggingface-cli download meta-llama/Meta-Llama-3-8B-Instruct --include "original/*" --local-dir meta-llama/Meta-Llama-3-8B-Instruct
 ```
 * Add Parameters to Initial Model:
