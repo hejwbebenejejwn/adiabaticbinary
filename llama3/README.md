@@ -14,7 +14,7 @@ git lfs install
 ```
 * Install python packages
 ```bash
-cd path/to/project/binary_llama
+cd path/to/project/llama3
 pip install -r requirements.txt
 ```
 
@@ -22,12 +22,12 @@ pip install -r requirements.txt
 
 * Download Data Sets:
 ```bash
-cd path/to/project/binary_llama3/datasets
+cd path/to/project/llama3/datasets
 git clone https://huggingface.co/datasets/cerebras/SlimPajama-627B
 ```
 * Tokenize Data Sets:
 ```bash
-cd path/to/project/binary_llama3/datasets
+cd path/to/project/llama3/datasets
 python prepare_slimpajama.py
 ```
 
@@ -39,7 +39,7 @@ huggingface-cli download meta-llama/Meta-Llama-3-8B-Instruct --include "original
 ```
 * Add Parameters to Initial Model:
 ```bash
-cd path/to/project/binary_llama3
+cd path/to/project/llama3
 python add_parameters.py
 ```
 
@@ -48,13 +48,13 @@ python add_parameters.py
 
 * single node with multi GPUs:
 ```bash
-cd path/to/project/binary_llama3
+cd path/to/project/llama3
 torchrun --nproc_per_node=1 --nnodes=8 --node_rank=0 --master_addr="localhost" --master_port=12345 train.py
 ```
 
 * multi nodes, each with single GPU:
 ```bash
-cd path/to/project/binary_llama3
+cd path/to/project/llama3
 # on node 1
 torchrun --nproc_per_node=4 --nnodes=1 --node_rank=0 --master_addr="192.168.0.1" --master_port=12345 train.py
 # on node 2
