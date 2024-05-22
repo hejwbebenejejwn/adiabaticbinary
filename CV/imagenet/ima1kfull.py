@@ -26,9 +26,9 @@ def fit(model: resnet1.ResNet, optim, lossfunc, trainloader: DataLoader):
     model.train()
     totalloss = 0
     for data, target in trainloader:
-        data, target = data.to(device), target.to(device)
+        data, target = data.cuda(), target.cuda()
         optim.zero_grad()
-        output = model(data).to(device)
+        output = model(data)
         loss = lossfunc(output, target)
         loss.backward()
         optim.step()
@@ -47,7 +47,7 @@ def evaluate(
     total = 0
     with torch.no_grad():
         for inputs, labels in val_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
+            inputs, labels = inputs.cuda(), labels.cuda()
             outputs = model(inputs)
             loss += lossfunc(outputs, labels).item() * inputs.size(0)
             _, predicted_top1 = torch.max(outputs, 1)
@@ -61,16 +61,29 @@ def evaluate(
     return loss, acc_top1, acc_top5
 
 
-model = resnet1.ResNet(False, 1000, False).to(device)
-# model.load_state_dict(torch.load("pre1full.pth"))
+model = resnet1.ResNet(False, 1000, False)
 lossfunc = nn.CrossEntropyLoss().to(device)
-train_loader, val_loader, test_loader = read_dataset(32, subset=False, num_workers=2)
+train_loader, val_loader, test_loader = read_dataset(128, subset=False, num_workers=16)
 
 lr = 0.1
 counter = 0
-min_val_loss1 = np.inf
+min_val_loss=min_val_loss1 = np.inf
 min_val_loss5 = np.inf
-for epoch in range(500):
+
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
+    model.cuda() 
+    print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+else:
+    model.cuda()
+    print("Using single GPU")
+
+
+model.load_state_dict(torch.load(os.path.join(CHECKPOINTS_DIR,"pre1full.pth")))
+
+
+
+for epoch in range(100):
     if counter / 10 == 1:
         counter = 0
         lr *= 0.5
