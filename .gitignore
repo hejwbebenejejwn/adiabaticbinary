@@ -1,4 +1,13 @@
 .DS_Store
 **/__pycache__/
 **/*.pth
+**/*.pt
 wandb
+
+# Add the new paths to ignore
+./llama3/datasets/SlimPajama-627B
+./llama3/datasets/download.log
+./llama3/datasets/download.sh
+./llama3/datasets/task.pbs
+./llama3/datasets/task.sh
+./llama3/models
