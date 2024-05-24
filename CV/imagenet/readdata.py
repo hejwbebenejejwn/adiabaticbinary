@@ -49,8 +49,8 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,subset=True):
         test_loader = torch.utils.data.DataLoader(valset, batch_size=batch_size, 
             sampler=test_sampler, num_workers=num_workers)
     else:
-        train_path="D:/usr14/project/Binary/imagenet1/train"
-        test_path="D:/usr14/project/Binary/imagenet1/valimage/validation"
+        train_path="/data/home/wwang/projs/binary/data/imagenet/train"
+        test_path="/data/home/wwang/projs/binary/data/imagenet/val"
         trainset=datasets.ImageFolder(train_path,transform_train)
         valset=datasets.ImageFolder(train_path,transform_test)
         testset=datasets.ImageFolder(test_path,transform_test)
