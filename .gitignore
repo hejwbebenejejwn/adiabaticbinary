@@ -8,6 +8,8 @@ wandb
 ./llama3/task.pbs
 ./llama3/task.sh
 ./llama3/datasets/SlimPajama-627B
+./llama3/datasets/tokenized
+./llama3/datasets/log.out
 ./llama3/datasets/download.log
 ./llama3/datasets/download.sh
 ./llama3/datasets/task.pbs
