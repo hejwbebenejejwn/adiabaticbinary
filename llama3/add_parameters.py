@@ -22,3 +22,4 @@ os.makedirs(save_dir, exist_ok=True)
 torch.save(model.model.state_dict(), os.path.join(save_dir, 'consolidated.00.pth'))
 
 shutil.copy(os.path.join(ckpt_dir, 'params.json'), os.path.join(save_dir, 'params.json'))
+shutil.copy(os.path.join(ckpt_dir, 'tokenizer.model'), os.path.join('models', 'tokenizer.model'))

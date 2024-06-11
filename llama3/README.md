@@ -20,19 +20,6 @@ pip install -r requirements.txt
 
 ### STEP2
 
-* Download Data Sets:
-```bash
-cd path/to/project/llama3/datasets
-git clone https://huggingface.co/datasets/cerebras/SlimPajama-627B
-```
-* Tokenize Data Sets:
-```bash
-cd path/to/project/llama3/datasets
-python prepare_slimpajama.py
-```
-
-### STEP3
-
 * Download Pre-trained Model Weights:
 ```bash
 cd path/to/project/llama3/models
@@ -42,6 +29,19 @@ huggingface-cli download meta-llama/Meta-Llama-3-8B-Instruct --include "original
 ```bash
 cd path/to/project/llama3
 python add_parameters.py
+```
+
+### STEP3
+
+* Download Data Sets:
+```bash
+cd path/to/project/llama3/datasets
+git clone https://huggingface.co/datasets/cerebras/SlimPajama-627B
+```
+* Tokenize Data Sets:
+```bash
+cd path/to/project/llama3/datasets
+python prepare_slimpajama.py
 ```
 
 ### STEP4
