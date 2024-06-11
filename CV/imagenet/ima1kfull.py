@@ -65,7 +65,7 @@ model = resnet1.ResNet(False, 1000, False)
 lossfunc = nn.CrossEntropyLoss().to(device)
 train_loader, val_loader, test_loader = read_dataset(128, subset=False, num_workers=16)
 
-lr = .1/2048
+lr = .1
 counter = 0
 min_val_loss=min_val_loss1 = np.inf
 min_val_loss5 = np.inf
