@@ -6,6 +6,9 @@ import wandb
 import fire
 from typing import Optional, Tuple, List
 from multiprocessing import cpu_count
+import psutil
+import platform
+import GPUtil
 
 import torch
 import torch.nn as nn
@@ -192,6 +195,9 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
             start = time.time()
 
         train_epoch_loss.append(train_loss)
+
+    GPUtil.showUtilization()
+
     # step lr scheduler every epoch
     lr_scheduler.step()
     TrainingState.epoch += 1
@@ -332,13 +338,32 @@ def main(config: Config = Config()) -> None:
     wandb.config.update(config)
     os.makedirs(config.save_path, exist_ok=True)
 
+    # show platform information
+    cpu_model = platform.processor()
+    memory_info = psutil.virtual_memory()
+    total_memory_gb = memory_info.total / (1024 ** 3)
+    memory_usage_percent = memory_info.percent
+    cpu_threads = psutil.cpu_count(logical=True)
+    cpu_usage = psutil.cpu_percent(interval=1)
+    print(f"CPU: {cpu_model}")
+    print(f"Memory: {total_memory_gb:.2f} GB")
+    print(f"Memory usage: {memory_usage_percent:.2f}%")
+    print(f"CPU threads: {cpu_threads}")
+    print(f"CPU usage: {cpu_usage}%")
+    gpus = GPUtil.getGPUs()
+    for gpu in gpus:
+        print(f"GPU: {gpu.name}")
+        print(f"Memory Total: {gpu.memoryTotal / 1024:.2f} GB")
+
     # prepare model
+    print("=" * 10, "Preparing Model", "=" * 10)
     set_up(config)
 
     # check if resume
     ckpt_files = glob(f'{config.save_path}/*.pt', recursive=True)
     latest_checkpoint = max(ckpt_files, key=lambda x: int(re.search(r'(\d+)', x).group(1)), default=None)
     if latest_checkpoint:
+        print("=" * 10, f"Resume from {latest_checkpoint}", "=" * 10)
         checkpoint = torch.load(latest_checkpoint)['train_state']
         for attr in TrainingState.__dict__.keys():
             setattr(TrainingState, attr, checkpoint[attr])
