@@ -21,7 +21,7 @@ from llama import Llama, Tokenizer, Transformer
 from binary_llama import BinaryLlama, BinaryTransformer
 from datasets import TokenizedDataset
 
-torch.set_float32_matmul_precision('low')
+torch.set_float32_matmul_precision('medium')
 wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
 
 rank = int(os.environ["RANK"])
