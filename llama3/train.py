@@ -1,6 +1,7 @@
 import os
 import re
 from glob import glob
+import time
 import wandb
 import fire
 from typing import Optional, Tuple, List
@@ -49,7 +50,9 @@ class Config:
     top_p: float = 0.9
 
     # training config
-    accum_batches: int = 8
+    unbinary_ratio_threshold: float = 0.005  # training termination threshold
+    kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2
+    accum_batches: int = 16
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100
@@ -78,6 +81,8 @@ class TrainingState:
     lr_scheduler: torch.optim.lr_scheduler.StepLR
 
     # train steps
+    kk: float = 1.
+    aa: float = 1.
     epoch: int = 0
     accum_step: int = 0  # Number of gradient accumulation steps
     unbinary_ratio: List[float] = []
@@ -162,6 +167,11 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
     scaler = GradScaler()
 
     # training loops
+    kk = TrainingState.kk
+    aa = TrainingState.aa
+    print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training =====", flush=True)
+    start = 0
+
     train_epoch_loss = []
     for i, data in enumerate(train_dataloader):
         data = data.to(device, non_blocking=True)
@@ -174,6 +184,12 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
             TrainingState.accum_step += 1
+            n_accum = TrainingState.accum_step
+
+            elapsed = time.time() - start
+            print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f} "
+                  + f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
+            start = time.time()
 
         train_epoch_loss.append(train_loss)
     # step lr scheduler every epoch
@@ -204,6 +220,9 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     model = TrainingState.model
     model.eval()
 
+    kk = TrainingState.kk
+    aa = TrainingState.aa
+    print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation =====", flush=True)
     with torch.no_grad(), autocast(dtype=torch.bfloat16):
         valid_epoch_loss = []
         for data in valid_dataloader:
@@ -229,12 +248,14 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     TrainingState.unbinary_ratio.append(max_unbinary_ratio)
     wandb.log({'unbinary_ratio': max_unbinary_ratio})
 
+    print(f"Remaining Unbinary Weight: {max_unbinary_ratio * 100:.2f} % ")
+
 
 # %% early stop methods
-# call back at the end of each epoch
-# push kk and rewind model state
 def kk_callback(config: Config = Config()) -> None:
-    """kk Callback Function"""
+    """kk Callback Function:
+    Call back at the end of each epoch.
+    Push kk and rewind model state."""
     current_epoch = TrainingState.epoch
 
     # adjust gamma
@@ -283,11 +304,19 @@ def kk_callback(config: Config = Config()) -> None:
             aa = torch.tensor([1.], dtype=kk.dtype, device=device)
 
         # stage 1
-        if kk < 100:
+        if kk < config.kk_threshold:
             TrainingState.model.set_kk_stage1(torch.tensor([kk, aa], dtype=kk.dtype, device=device))
         # stage 2
         else:
             TrainingState.model.set_kk_stage2(torch.tensor(config.ratio, dtype=kk.dtype, device=device))
+
+        # record changes
+        kk = TrainingState.model.state_dict()['layers.0.attention.wq.kk']
+        aa = TrainingState.model.state_dict()['layers.0.attention.wq.aa']
+        TrainingState.kk = kk
+        TrainingState.aa = aa
+        wandb.log({'kk': kk})
+        wandb.log({'aa': aa})
 
         # initialize temporary parameters
         TrainingState.best_epoch = 0
@@ -296,7 +325,7 @@ def kk_callback(config: Config = Config()) -> None:
         TrainingState.temp_unbinary_ratio = []
 
 
-# %% main
+# %% main function
 def main(config: Config = Config()) -> None:
     # initialize
     wandb.init(project='binary-llama')
@@ -349,7 +378,14 @@ def main(config: Config = Config()) -> None:
     TrainingState.llama_model = DDP(llama_model, device_ids=[local_rank], output_device=local_rank)
     TrainingState.model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    while current_unbinary_ratio > 0.005:
+    # run training
+    while current_unbinary_ratio > config.unbinary_ratio_threshold:
+        kk = TrainingState.kk
+        if kk < config.kk_threshold:
+            print("=" * 10, "Training Stage 1", "=" * 10)
+        else:
+            print("=" * 10, "Training Stage 2", "=" * 10)
+
         training(train_dataloader, config)
         validation(valid_dataloader, config)
         kk_callback(config)
