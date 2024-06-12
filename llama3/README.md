@@ -1,6 +1,6 @@
 ## Binary KD Training
 
-### STEP1
+## STEP1
 
 ### Environments Requirements:
 * Install git lfs (Ubuntu based Linux)
@@ -18,7 +18,7 @@ cd path/to/project/llama3
 pip install -r requirements.txt
 ```
 
-### STEP2
+## STEP2
 
 * Download Pre-trained Model Weights:
 ```bash
@@ -31,7 +31,7 @@ cd path/to/project/llama3
 python add_parameters.py
 ```
 
-### STEP3
+## STEP3
 
 * Download Data Sets:
 ```bash
@@ -44,7 +44,8 @@ cd path/to/project/llama3/datasets
 python prepare_slimpajama.py
 ```
 
-### STEP4
+## STEP4
+
 ### Start Training
 
 * single node with multi GPUs:
