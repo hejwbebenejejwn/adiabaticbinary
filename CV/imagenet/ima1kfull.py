@@ -65,7 +65,7 @@ model = resnet1.ResNet(False, 1000, False)
 lossfunc = nn.CrossEntropyLoss().to(device)
 train_loader, val_loader, test_loader = read_dataset(128, subset=False, num_workers=16)
 
-lr = 0.1
+lr = .1
 counter = 0
 min_val_loss=min_val_loss1 = np.inf
 min_val_loss5 = np.inf
@@ -81,7 +81,9 @@ else:
 
 model.load_state_dict(torch.load(os.path.join(CHECKPOINTS_DIR,"pre1full.pth")))
 
-
+min_val_loss,val_acc1,val_acc5=evaluate(model,test_loader,lossfunc)
+min_val_loss1=min_val_loss
+print(f"init: val_loss: {min_val_loss}, top1_acc:{val_acc1}, top5_acc:{val_acc5}")
 
 for epoch in range(100):
     if counter / 10 == 1:
