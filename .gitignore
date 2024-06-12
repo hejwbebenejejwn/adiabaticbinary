@@ -7,11 +7,6 @@ wandb
 # Add the new paths to ignore
 ./llama3/task.pbs
 ./llama3/task.sh
-./llama3/datasets/SlimPajama-627B
-./llama3/datasets/tokenized
-./llama3/datasets/log.out
-./llama3/datasets/download.log
-./llama3/datasets/download.sh
-./llama3/datasets/task.pbs
-./llama3/datasets/task.sh
+./llama3/train.sh
+./llama3/datasets
 ./llama3/models

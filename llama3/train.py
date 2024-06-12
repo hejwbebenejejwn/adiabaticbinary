@@ -33,7 +33,7 @@ class Config:
     dataset_ratio: list = None
     batch_size: int = 128
     shuffle: bool = True
-    dtype: torch.dtype = torch.float32
+    dtype: torch.dtype = torch.float16
 
     # model config
     llama_ckpt_path: str = 'models/Meta-Llama-3-8B'
@@ -136,13 +136,13 @@ def training_step(batch, config: Config = Config()) -> torch.Tensor:
     target_tokens = batch[:, 1:config.block_size + 1].contiguous().reshape(-1).view(-1).long()
 
     binary_logits, _ = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.temperature, logprobs=True)
-    binary_logits = binary_logits.to(device=device, dtype=config.dtype).view(-1, binary_logits.size(-1))
+    binary_logits = binary_logits.to(device=device, dtype=torch.float32).view(-1, binary_logits.size(-1))
 
     _, llama_kd_probs = llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
-    llama_kd_probs = llama_kd_probs.to(device=device, dtype=config.dtype).view(-1, llama_kd_probs.size(-1))
+    llama_kd_probs = llama_kd_probs.to(device=device, dtype=torch.float32).view(-1, llama_kd_probs.size(-1))
 
     _, binary_kd_probs = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
-    binary_kd_probs = binary_kd_probs.to(device=device, dtype=config.dtype).view(-1, binary_kd_probs.size(-1))
+    binary_kd_probs = binary_kd_probs.to(device=device, dtype=torch.float32).view(-1, binary_kd_probs.size(-1))
 
     # logit KD loss
     loss_ce = loss_fn1(input=binary_logits, target=target_tokens, ignore_index=-1)
@@ -193,7 +193,7 @@ def validation_step(batch, config: Config = Config()) -> torch.Tensor:
     loss_fn1 = TrainingState.loss_fn1
 
     valid_logits, _ = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.temperature, logprobs=True)
-    valid_logits = valid_logits.to(device=device, dtype=config.dtype).view(-1, valid_logits.size(-1))
+    valid_logits = valid_logits.to(device=device, dtype=torch.float32).view(-1, valid_logits.size(-1))
 
     valid_loss = loss_fn1(input=valid_logits, target=target_tokens, ignore_index=-1)
     return valid_loss
