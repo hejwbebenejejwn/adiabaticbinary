@@ -4,7 +4,7 @@
 **/*.pt
 wandb
 
-# Add the new paths to ignore
+# binary llama3 paths to ignore
 ./llama3/task.pbs
 ./llama3/task.sh
 ./llama3/train.sh
