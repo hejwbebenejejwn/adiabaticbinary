@@ -357,11 +357,13 @@ def main(config: Config = Config()) -> None:
         print(f"Memory: {total_memory_gb:.2f} GB")
         print(f"Memory usage: {memory_usage_percent:.2f}%")
         print(f"CPU threads: {cpu_threads}")
-        print(f"CPU usage: {cpu_usage}%")
+        print(f"CPU usage: {cpu_usage}%\n")
         gpus = GPUtil.getGPUs()
+        i = 0
         for gpu in gpus:
-            print(f"GPU: {gpu.name}")
+            print(f"GPU{i}: {gpu.name}")
             print(f"Memory Total: {gpu.memoryTotal / 1024:.2f} GB")
+            i += 1
         GPUtil.showUtilization()
 
     # prepare model
