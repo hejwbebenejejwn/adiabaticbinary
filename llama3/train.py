@@ -11,7 +11,7 @@ import platform
 import GPUtil
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -78,8 +78,8 @@ class TrainingState:
     llama: Llama
     llama_model: Transformer
     model: BinaryTransformer
-    loss_fn1: nn.CrossEntropyLoss
-    loss_fn2: nn.MSELoss
+    loss_fn1: F.cross_entropy
+    loss_fn2: F.mse_loss
     optimizer: torch.optim.Adam
     lr_scheduler: torch.optim.lr_scheduler.StepLR
 
@@ -116,8 +116,8 @@ def set_up(config: Config = Config()) -> None:
     binary_model = binary_llama.model
     llama_model = llama.model
 
-    loss_fn1 = nn.CrossEntropyLoss()
-    loss_fn2 = nn.MSELoss()
+    loss_fn1 = F.cross_entropy
+    loss_fn2 = F.mse_loss
     optimizer = torch.optim.Adam(binary_model.parameters(), betas=config.betas, lr=config.base_lr)
     # change base_step_size & base_gamma as current lr changes
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.base_step_size, gamma=config.base_gamma)
