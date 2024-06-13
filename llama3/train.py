@@ -173,7 +173,8 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
     if local_rank == 0:
         kk = TrainingState.kk
         aa = TrainingState.aa
-        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training =====", flush=True)
+        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training "
+              + "=" * 10, flush=True)
     start = 0
 
     train_epoch_loss = []
@@ -231,7 +232,8 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     kk = TrainingState.kk
     aa = TrainingState.aa
     if local_rank == 0:
-        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation =====", flush=True)
+        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation "
+              + "=" * 10, flush=True)
     with torch.no_grad(), autocast(dtype=torch.bfloat16):
         valid_epoch_loss = []
         for data in valid_dataloader:
