@@ -359,6 +359,7 @@ def main(config: Config = Config()) -> None:
         for gpu in gpus:
             print(f"GPU: {gpu.name}")
             print(f"Memory Total: {gpu.memoryTotal / 1024:.2f} GB")
+        GPUtil.showUtilization()
 
     # prepare model
     if local_rank == 0:
