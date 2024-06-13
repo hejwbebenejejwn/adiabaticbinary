@@ -344,6 +344,7 @@ def main(config: Config = Config()) -> None:
 
     # show platform information
     if local_rank == 0:
+        print("=" * 20, "Platform Information", "=" * 20)
         cpu_model = platform.processor()
         memory_info = psutil.virtual_memory()
         total_memory_gb = memory_info.total / (1024 ** 3)
@@ -363,7 +364,7 @@ def main(config: Config = Config()) -> None:
 
     # prepare model
     if local_rank == 0:
-        print("=" * 10, "Preparing Model", "=" * 10)
+        print("=" * 20, "Preparing Model", "=" * 20)
     set_up(config)
 
     # check if resume
@@ -371,7 +372,7 @@ def main(config: Config = Config()) -> None:
     latest_checkpoint = max(ckpt_files, key=lambda x: int(re.search(r'(\d+)', x).group(1)), default=None)
     if latest_checkpoint:
         if local_rank == 0:
-            print("=" * 10, f"Resume from {latest_checkpoint}", "=" * 10)
+            print("=" * 20, f"Resume from {latest_checkpoint}", "=" * 20)
         checkpoint = torch.load(latest_checkpoint)['train_state']
         for attr in TrainingState.__dict__.keys():
             setattr(TrainingState, attr, checkpoint[attr])
@@ -416,9 +417,9 @@ def main(config: Config = Config()) -> None:
         if local_rank == 0:
             kk = TrainingState.kk
             if kk < config.kk_threshold:
-                print("=" * 10, "Training Stage 1", "=" * 10)
+                print("=" * 20, "Training Stage 1", "=" * 20)
             else:
-                print("=" * 10, "Training Stage 2", "=" * 10)
+                print("=" * 20, "Training Stage 2", "=" * 20)
 
         training(train_dataloader, config)
         validation(valid_dataloader, config)
