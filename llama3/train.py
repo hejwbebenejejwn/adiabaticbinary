@@ -170,9 +170,10 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
     scaler = GradScaler()
 
     # training loops
-    kk = TrainingState.kk
-    aa = TrainingState.aa
-    print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training =====", flush=True)
+    if local_rank == 0:
+        kk = TrainingState.kk
+        aa = TrainingState.aa
+        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training =====", flush=True)
     start = 0
 
     train_epoch_loss = []
@@ -189,10 +190,11 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
             TrainingState.accum_step += 1
             n_accum = TrainingState.accum_step
 
-            elapsed = time.time() - start
-            print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f} "
-                  + f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
-            start = time.time()
+            if local_rank == 0:
+                elapsed = time.time() - start
+                print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f} " +
+                      f"| Tokens/Sec: {config.max_seq_len/elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
+                start = time.time()
 
         train_epoch_loss.append(train_loss)
 
@@ -228,7 +230,8 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
 
     kk = TrainingState.kk
     aa = TrainingState.aa
-    print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation =====", flush=True)
+    if local_rank == 0:
+        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation =====", flush=True)
     with torch.no_grad(), autocast(dtype=torch.bfloat16):
         valid_epoch_loss = []
         for data in valid_dataloader:
@@ -254,7 +257,8 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     TrainingState.unbinary_ratio.append(max_unbinary_ratio)
     wandb.log({'unbinary_ratio': max_unbinary_ratio})
 
-    print(f"Remaining Unbinary Weight: {max_unbinary_ratio * 100:.2f} % ")
+    if local_rank == 0:
+        print(f"Remaining Unbinary Weight: {max_unbinary_ratio * 100:.2f} % ")
 
 
 # %% early stop methods
@@ -339,31 +343,34 @@ def main(config: Config = Config()) -> None:
     os.makedirs(config.save_path, exist_ok=True)
 
     # show platform information
-    cpu_model = platform.processor()
-    memory_info = psutil.virtual_memory()
-    total_memory_gb = memory_info.total / (1024 ** 3)
-    memory_usage_percent = memory_info.percent
-    cpu_threads = psutil.cpu_count(logical=True)
-    cpu_usage = psutil.cpu_percent(interval=1)
-    print(f"CPU: {cpu_model}")
-    print(f"Memory: {total_memory_gb:.2f} GB")
-    print(f"Memory usage: {memory_usage_percent:.2f}%")
-    print(f"CPU threads: {cpu_threads}")
-    print(f"CPU usage: {cpu_usage}%")
-    gpus = GPUtil.getGPUs()
-    for gpu in gpus:
-        print(f"GPU: {gpu.name}")
-        print(f"Memory Total: {gpu.memoryTotal / 1024:.2f} GB")
+    if local_rank == 0:
+        cpu_model = platform.processor()
+        memory_info = psutil.virtual_memory()
+        total_memory_gb = memory_info.total / (1024 ** 3)
+        memory_usage_percent = memory_info.percent
+        cpu_threads = psutil.cpu_count(logical=True)
+        cpu_usage = psutil.cpu_percent(interval=1)
+        print(f"CPU: {cpu_model}")
+        print(f"Memory: {total_memory_gb:.2f} GB")
+        print(f"Memory usage: {memory_usage_percent:.2f}%")
+        print(f"CPU threads: {cpu_threads}")
+        print(f"CPU usage: {cpu_usage}%")
+        gpus = GPUtil.getGPUs()
+        for gpu in gpus:
+            print(f"GPU: {gpu.name}")
+            print(f"Memory Total: {gpu.memoryTotal / 1024:.2f} GB")
 
     # prepare model
-    print("=" * 10, "Preparing Model", "=" * 10)
+    if local_rank == 0:
+        print("=" * 10, "Preparing Model", "=" * 10)
     set_up(config)
 
     # check if resume
     ckpt_files = glob(f'{config.save_path}/*.pt', recursive=True)
     latest_checkpoint = max(ckpt_files, key=lambda x: int(re.search(r'(\d+)', x).group(1)), default=None)
     if latest_checkpoint:
-        print("=" * 10, f"Resume from {latest_checkpoint}", "=" * 10)
+        if local_rank == 0:
+            print("=" * 10, f"Resume from {latest_checkpoint}", "=" * 10)
         checkpoint = torch.load(latest_checkpoint)['train_state']
         for attr in TrainingState.__dict__.keys():
             setattr(TrainingState, attr, checkpoint[attr])
@@ -405,11 +412,12 @@ def main(config: Config = Config()) -> None:
 
     # run training
     while current_unbinary_ratio > config.unbinary_ratio_threshold:
-        kk = TrainingState.kk
-        if kk < config.kk_threshold:
-            print("=" * 10, "Training Stage 1", "=" * 10)
-        else:
-            print("=" * 10, "Training Stage 2", "=" * 10)
+        if local_rank == 0:
+            kk = TrainingState.kk
+            if kk < config.kk_threshold:
+                print("=" * 10, "Training Stage 1", "=" * 10)
+            else:
+                print("=" * 10, "Training Stage 2", "=" * 10)
 
         training(train_dataloader, config)
         validation(valid_dataloader, config)
