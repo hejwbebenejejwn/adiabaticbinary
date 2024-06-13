@@ -2,11 +2,11 @@
 **/__pycache__/
 **/*.pth
 **/*.pt
-wandb
+wandb/
 
 # binary llama3 paths to ignore
 ./llama3/task.pbs
 ./llama3/task.sh
 ./llama3/train.sh
-./llama3/datasets
-./llama3/models
+./llama3/datasets/
+./llama3/models/
