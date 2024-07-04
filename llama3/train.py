@@ -383,17 +383,16 @@ def main(config: Config = Config()) -> None:
 
     # prepare data
     # datasets
-    if local_rank == 0:
-        tokenizer = Tokenizer(config.tokenizer_path)
-        train_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_path,
-                                         dataset_ratio=config.dataset_ratio, mode='training', shuffle=config.shuffle,
-                                         max_seq_len=config.max_seq_len, pad_id=tokenizer.pad_id)
-        valid_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_path,
-                                         dataset_ratio=config.dataset_ratio, mode='validation', shuffle=config.shuffle,
-                                         max_seq_len=config.max_seq_len, pad_id=tokenizer.pad_id)
-        test_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_path,
-                                        dataset_ratio=config.dataset_ratio, mode='test', shuffle=config.shuffle,
-                                        max_seq_len=config.max_seq_len, pad_id=tokenizer.pad_id)
+    tokenizer = Tokenizer(config.tokenizer_path)
+    train_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_path,
+                                     dataset_ratio=config.dataset_ratio, mode='training', shuffle=config.shuffle,
+                                     max_seq_len=config.max_seq_len, pad_id=tokenizer.pad_id)
+    valid_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_path,
+                                     dataset_ratio=config.dataset_ratio, mode='validation', shuffle=config.shuffle,
+                                     max_seq_len=config.max_seq_len, pad_id=tokenizer.pad_id)
+    test_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_path,
+                                    dataset_ratio=config.dataset_ratio, mode='test', shuffle=config.shuffle,
+                                    max_seq_len=config.max_seq_len, pad_id=tokenizer.pad_id)
     # dataloaders
     train_sampler = DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size,
