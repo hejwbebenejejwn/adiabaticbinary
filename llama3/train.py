@@ -98,23 +98,26 @@ class TrainingState:
 
 
 # %% setup
-def build_model(config: Config = Config()) -> Tuple[BinaryLlama, Llama]:
+# def build_model(config: Config = Config()) -> Tuple[BinaryLlama, Llama]:
+def build_model(config: Config = Config()) -> BinaryLlama:
     # build binary model
     binary_llama = BinaryLlama.build(ckpt_dir=config.initial_ckpt_path, tokenizer_path=config.tokenizer_path,
                                      max_seq_len=config.max_seq_len, max_batch_size=config.max_batch_size,
                                      model_parallel_size=config.model_parallel_size, seed=config.seed)
-    # build llama model
-    llama = Llama.build(ckpt_dir=config.llama_ckpt_path, tokenizer_path=config.tokenizer_path,
-                        max_seq_len=config.max_seq_len, max_batch_size=config.max_batch_size,
-                        model_parallel_size=config.model_parallel_size, seed=config.seed)
-    return binary_llama, llama
+    # # build llama model
+    # llama = Llama.build(ckpt_dir=config.llama_ckpt_path, tokenizer_path=config.tokenizer_path,
+    #                     max_seq_len=config.max_seq_len, max_batch_size=config.max_batch_size,
+    #                     model_parallel_size=config.model_parallel_size, seed=config.seed)
+    # return binary_llama, llama
+    return binary_llama
 
 
 def set_up(config: Config = Config()) -> None:
     """Build model and Initialize optimizer & learning rate scheduler"""
-    binary_llama, llama = build_model(config)
+    # binary_llama, llama = build_model(config)
+    binary_llama = build_model(config)
     binary_model = binary_llama.model
-    llama_model = llama.model
+    # llama_model = llama.model
 
     loss_fn1 = F.cross_entropy
     loss_fn2 = F.mse_loss
@@ -123,11 +126,11 @@ def set_up(config: Config = Config()) -> None:
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.base_step_size, gamma=config.base_gamma)
 
     TrainingState.binary_llama = binary_llama
-    TrainingState.llama = llama
+    # TrainingState.llama = llama
     TrainingState.model = binary_model
-    TrainingState.llama_model = llama_model
+    # TrainingState.llama_model = llama_model
     TrainingState.loss_fn1 = loss_fn1
-    TrainingState.loss_fn2 = loss_fn2
+    # TrainingState.loss_fn2 = loss_fn2
     TrainingState.optimizer = optimizer
     TrainingState.lr_scheduler = lr_scheduler
 
@@ -136,9 +139,9 @@ def set_up(config: Config = Config()) -> None:
 def training_step(batch, config: Config = Config()) -> torch.Tensor:
     """Training Step"""
     binary_llama = TrainingState.binary_llama
-    llama = TrainingState.llama
+    # llama = TrainingState.llama
     loss_fn1 = TrainingState.loss_fn1
-    loss_fn2 = TrainingState.loss_fn2
+    # loss_fn2 = TrainingState.loss_fn2
 
     input_tokens = batch[:, 0:config.block_size].contiguous()
     target_tokens = batch[:, 1:config.block_size + 1].contiguous().reshape(-1).view(-1).long()
@@ -146,16 +149,17 @@ def training_step(batch, config: Config = Config()) -> torch.Tensor:
     binary_logits, _ = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.temperature, logprobs=True)
     binary_logits = binary_logits.to(device=device, dtype=torch.float32).view(-1, binary_logits.size(-1))
 
-    _, llama_kd_probs = llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
-    llama_kd_probs = llama_kd_probs.to(device=device, dtype=torch.float32).view(-1, llama_kd_probs.size(-1))
+    # _, llama_kd_probs = llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
+    # llama_kd_probs = llama_kd_probs.to(device=device, dtype=torch.float32).view(-1, llama_kd_probs.size(-1))
 
-    _, binary_kd_probs = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
-    binary_kd_probs = binary_kd_probs.to(device=device, dtype=torch.float32).view(-1, binary_kd_probs.size(-1))
+    # _, binary_kd_probs = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
+    # binary_kd_probs = binary_kd_probs.to(device=device, dtype=torch.float32).view(-1, binary_kd_probs.size(-1))
 
     # logit KD loss
     loss_ce = loss_fn1(input=binary_logits, target=target_tokens, ignore_index=-1)
-    loss_mse = loss_fn2(input=binary_kd_probs, target=llama_kd_probs)
-    loss = loss_ce + loss_mse * config.kd_alpha
+    # loss_mse = loss_fn2(input=binary_kd_probs, target=llama_kd_probs)
+    # loss = loss_ce + loss_mse * config.kd_alpha
+    loss = loss_ce
 
     # feature KD loss
     return loss
@@ -408,12 +412,12 @@ def main(config: Config = Config()) -> None:
     current_unbinary_ratio = 1.
     model = TrainingState.model
     model.to(device)
-    llama_model = TrainingState.llama_model
-    llama_model.to(device)
-    llama_model.eval()  # set initial llama model evaluation only
+    # llama_model = TrainingState.llama_model
+    # llama_model.to(device)
+    # llama_model.eval()  # set initial llama model evaluation only
 
     # make ddp model
-    TrainingState.llama_model = DDP(llama_model, device_ids=[local_rank], output_device=local_rank)
+    # TrainingState.llama_model = DDP(llama_model, device_ids=[local_rank], output_device=local_rank)
     TrainingState.model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     # run training
