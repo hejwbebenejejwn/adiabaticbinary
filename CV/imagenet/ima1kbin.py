@@ -21,7 +21,7 @@ import numpy as np
 from readdata import read_dataset
 import wandb
 
-wandb.login(key="86d6482d3fd7abdbe5d578208634a88905840ce9")
+# wandb.login(key="86d6482d3fd7abdbe5d578208634a88905840ce9")
 device = torch.device("cuda")
 
 
@@ -65,7 +65,8 @@ def evaluate(
 
 
 model = resnet1.ResNet(True, 1000, False)
-dicfull = torch.load(os.path.join(CHECKPOINTS_DIR, "pre1full.pth"))
+dicfull = torch.load(os.path.join(CHECKPOINTS_DIR, "lr000039kk15acc54.pth"))
+dicfull = {k.replace('module.',''):v for k,v in dicfull.items()}
 dicbin = model.state_dict()
 dicbin.update(dicfull)
 model.load_state_dict(dicbin)
@@ -81,25 +82,26 @@ else:
 lossfunc = nn.CrossEntropyLoss().to(device)
 train_loader, val_loader, test_loader = read_dataset(128, subset=False, num_workers=16)
 
-wb = wandb.init(project="imagenet1k binary", name="first run", reinit=True)
+# wb = wandb.init(project="imagenet1k binary", name="first run", reinit=True)
+wb = False
 
 target_acc = 0.67
 mepoch = 99999999
-mstep_kk = 10
-mstep_lr = 5
-lr = 0.1
+mstep_kk = 25
+mstep_lr = 3
+lr = .1/256
 kk_mul = 1.5
 
 _, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
-print(f"last fullbest, top1:{val_acc1}, top5:{val_acc1}")
+print(f"last fullbest, top1:{val_acc1}, top5:{val_acc5}")
 while val_acc1 > target_acc:
-    model.set_kk(model.get_kk() * kk_mul)
+    model.module.set_kk(model.module.get_kk() * kk_mul)
     _, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
-    print(f"push kk to {model.get_kk()}, top1:{val_acc1}, top5:{val_acc5}")
-kk_now, ka_now = model.toBin()
+    print(f"push kk to {model.module.get_kk()}, top1:{val_acc1}, top5:{val_acc5}")
+kk_now, ka_now = model.module.toBin()
 bin_loss, binbest1, binbest5 = evaluate(model, val_loader, lossfunc)
 print(f"last binbest, top1:{binbest1}, top5{binbest5}, ka:{ka_now}, kk:{kk_now}")
-model.quitBin()
+model.module.quitBin()
 if binbest1 >= target_acc:
     print(RED + "target acc already reached" + RESET)
     sys.exit(0)
@@ -111,7 +113,7 @@ val_top1_best = 0
 val_top5_best = 0
 
 for epoch in range(mepoch):
-    if step_lr / 10 == 1:
+    if step_lr / mstep_lr  == 1:
         step_lr = 0
         lr *= 0.5
         print(GREEN + f"lr reduced to {lr}" + RESET)
@@ -127,20 +129,20 @@ for epoch in range(mepoch):
     else:
         step_lr += 1
 
-    model.toBin()
+    model.module.toBin()
     bin_loss, bintop1, bintop5 = evaluate(model, val_loader, lossfunc)
     if binbest1 < bintop1:
         binbest1 = bintop1
         binbest5 = bintop5
         _, testtop1, testtop5 = evaluate(model, test_loader, lossfunc)
         print(BLUE + f"test perf, top1:{testtop1}, top5:{testtop5}" + RESET)
-        model.quitBin()
+        model.module.quitBin()
         torch.save(
             model.state_dict(),
             os.path.join(CHECKPOINTS_DIR, "binbest.pth"),
         )
     else:
-        model.quitBin()
+        model.module.quitBin()
 
     if binbest1 > target_acc:
         print(RED + "target acc reached" + RESET)
@@ -155,7 +157,7 @@ for epoch in range(mepoch):
         val_acc5 = val_top5_best
         val_top1_best = 0
         step_kk = 0
-        print(f"reduce target acc to {target_acc}")
+        print(RED + f"reduce target acc to {target_acc}" + RESET)
 
     print(
         "epoch",
@@ -179,7 +181,7 @@ for epoch in range(mepoch):
         "lr",
         round(lr, 5),
         "kk",
-        round(model.get_kk(), 3),
+        round(model.module.get_kk(), 3),
         "tg",
         round(target_acc, 3),
     )
@@ -203,9 +205,9 @@ for epoch in range(mepoch):
         val_loss_best = np.inf
         lr = 0.1
         while val_acc1 > target_acc - 1e-4:
-            model.set_kk(model.get_kk() * kk_mul)
-            _, val_acc1, val_acc5 = evaluate(val_loader)
-        print(f"push kk to {model.get_kk()}, top1:{val_acc1}, top5:{val_acc5}")
+            model.module.set_kk(model.module.get_kk() * kk_mul)
+            _, val_acc1, val_acc5 = evaluate(model,val_loader,lossfunc)
+        print(YELLOW + f"push kk to {model.module.get_kk()}, top1:{val_acc1}, top5:{val_acc5}" + RESET)
     else:
         step_kk += 1
 if wb:
