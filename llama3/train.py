@@ -1,13 +1,17 @@
 import os
 import re
 from glob import glob
+import time
 import wandb
 import fire
 from typing import Optional, Tuple, List
 from multiprocessing import cpu_count
+import psutil
+import platform
+import GPUtil
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -33,7 +37,7 @@ class Config:
     dataset_ratio: list = None
     batch_size: int = 128
     shuffle: bool = True
-    dtype: torch.dtype = torch.float32
+    dtype: torch.dtype = torch.float16
 
     # model config
     llama_ckpt_path: str = 'models/Meta-Llama-3-8B'
@@ -49,7 +53,9 @@ class Config:
     top_p: float = 0.9
 
     # training config
-    accum_batches: int = 8
+    unbinary_ratio_threshold: float = 0.005  # training termination threshold
+    kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2
+    accum_batches: int = 16
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100
@@ -72,12 +78,14 @@ class TrainingState:
     llama: Llama
     llama_model: Transformer
     model: BinaryTransformer
-    loss_fn1: nn.CrossEntropyLoss
-    loss_fn2: nn.MSELoss
+    loss_fn1: F.cross_entropy
+    loss_fn2: F.mse_loss
     optimizer: torch.optim.Adam
     lr_scheduler: torch.optim.lr_scheduler.StepLR
 
     # train steps
+    kk: float = 1.
+    aa: float = 1.
     epoch: int = 0
     accum_step: int = 0  # Number of gradient accumulation steps
     unbinary_ratio: List[float] = []
@@ -90,36 +98,39 @@ class TrainingState:
 
 
 # %% setup
-def build_model(config: Config = Config()) -> Tuple[BinaryLlama, Llama]:
+# def build_model(config: Config = Config()) -> Tuple[BinaryLlama, Llama]:
+def build_model(config: Config = Config()) -> BinaryLlama:
     # build binary model
     binary_llama = BinaryLlama.build(ckpt_dir=config.initial_ckpt_path, tokenizer_path=config.tokenizer_path,
                                      max_seq_len=config.max_seq_len, max_batch_size=config.max_batch_size,
                                      model_parallel_size=config.model_parallel_size, seed=config.seed)
-    # build llama model
-    llama = Llama.build(ckpt_dir=config.llama_ckpt_path, tokenizer_path=config.tokenizer_path,
-                        max_seq_len=config.max_seq_len, max_batch_size=config.max_batch_size,
-                        model_parallel_size=config.model_parallel_size, seed=config.seed)
-    return binary_llama, llama
+    # # build llama model
+    # llama = Llama.build(ckpt_dir=config.llama_ckpt_path, tokenizer_path=config.tokenizer_path,
+    #                     max_seq_len=config.max_seq_len, max_batch_size=config.max_batch_size,
+    #                     model_parallel_size=config.model_parallel_size, seed=config.seed)
+    # return binary_llama, llama
+    return binary_llama
 
 
 def set_up(config: Config = Config()) -> None:
     """Build model and Initialize optimizer & learning rate scheduler"""
-    binary_llama, llama = build_model(config)
+    # binary_llama, llama = build_model(config)
+    binary_llama = build_model(config)
     binary_model = binary_llama.model
-    llama_model = llama.model
+    # llama_model = llama.model
 
-    loss_fn1 = nn.CrossEntropyLoss()
-    loss_fn2 = nn.MSELoss()
+    loss_fn1 = F.cross_entropy
+    loss_fn2 = F.mse_loss
     optimizer = torch.optim.Adam(binary_model.parameters(), betas=config.betas, lr=config.base_lr)
     # change base_step_size & base_gamma as current lr changes
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.base_step_size, gamma=config.base_gamma)
 
     TrainingState.binary_llama = binary_llama
-    TrainingState.llama = llama
+    # TrainingState.llama = llama
     TrainingState.model = binary_model
-    TrainingState.llama_model = llama_model
+    # TrainingState.llama_model = llama_model
     TrainingState.loss_fn1 = loss_fn1
-    TrainingState.loss_fn2 = loss_fn2
+    # TrainingState.loss_fn2 = loss_fn2
     TrainingState.optimizer = optimizer
     TrainingState.lr_scheduler = lr_scheduler
 
@@ -128,26 +139,27 @@ def set_up(config: Config = Config()) -> None:
 def training_step(batch, config: Config = Config()) -> torch.Tensor:
     """Training Step"""
     binary_llama = TrainingState.binary_llama
-    llama = TrainingState.llama
+    # llama = TrainingState.llama
     loss_fn1 = TrainingState.loss_fn1
-    loss_fn2 = TrainingState.loss_fn2
+    # loss_fn2 = TrainingState.loss_fn2
 
     input_tokens = batch[:, 0:config.block_size].contiguous()
     target_tokens = batch[:, 1:config.block_size + 1].contiguous().reshape(-1).view(-1).long()
 
     binary_logits, _ = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.temperature, logprobs=True)
-    binary_logits = binary_logits.to(device=device, dtype=config.dtype).view(-1, binary_logits.size(-1))
+    binary_logits = binary_logits.to(device=device, dtype=torch.float32).view(-1, binary_logits.size(-1))
 
-    _, llama_kd_probs = llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
-    llama_kd_probs = llama_kd_probs.to(device=device, dtype=config.dtype).view(-1, llama_kd_probs.size(-1))
+    # _, llama_kd_probs = llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
+    # llama_kd_probs = llama_kd_probs.to(device=device, dtype=torch.float32).view(-1, llama_kd_probs.size(-1))
 
-    _, binary_kd_probs = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
-    binary_kd_probs = binary_kd_probs.to(device=device, dtype=config.dtype).view(-1, binary_kd_probs.size(-1))
+    # _, binary_kd_probs = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.kd_temperature, logprobs=True)
+    # binary_kd_probs = binary_kd_probs.to(device=device, dtype=torch.float32).view(-1, binary_kd_probs.size(-1))
 
     # logit KD loss
     loss_ce = loss_fn1(input=binary_logits, target=target_tokens, ignore_index=-1)
-    loss_mse = loss_fn2(input=binary_kd_probs, target=llama_kd_probs)
-    loss = loss_ce + loss_mse * config.kd_alpha
+    # loss_mse = loss_fn2(input=binary_kd_probs, target=llama_kd_probs)
+    # loss = loss_ce + loss_mse * config.kd_alpha
+    loss = loss_ce
 
     # feature KD loss
     return loss
@@ -162,6 +174,13 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
     scaler = GradScaler()
 
     # training loops
+    if local_rank == 0:
+        kk = TrainingState.kk
+        aa = TrainingState.aa
+        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training "
+              + "=" * 10, flush=True)
+    start = 0
+
     train_epoch_loss = []
     for i, data in enumerate(train_dataloader):
         data = data.to(device, non_blocking=True)
@@ -174,8 +193,18 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
             TrainingState.accum_step += 1
+            n_accum = TrainingState.accum_step
+
+            if local_rank == 0:
+                elapsed = time.time() - start
+                print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f} " +
+                      f"| Tokens/Sec: {config.max_seq_len/elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
+                start = time.time()
 
         train_epoch_loss.append(train_loss)
+
+    GPUtil.showUtilization()
+
     # step lr scheduler every epoch
     lr_scheduler.step()
     TrainingState.epoch += 1
@@ -193,7 +222,7 @@ def validation_step(batch, config: Config = Config()) -> torch.Tensor:
     loss_fn1 = TrainingState.loss_fn1
 
     valid_logits, _ = binary_llama.gen(prompt_tokens=input_tokens, temperature=config.temperature, logprobs=True)
-    valid_logits = valid_logits.to(device=device, dtype=config.dtype).view(-1, valid_logits.size(-1))
+    valid_logits = valid_logits.to(device=device, dtype=torch.float32).view(-1, valid_logits.size(-1))
 
     valid_loss = loss_fn1(input=valid_logits, target=target_tokens, ignore_index=-1)
     return valid_loss
@@ -204,6 +233,11 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     model = TrainingState.model
     model.eval()
 
+    kk = TrainingState.kk
+    aa = TrainingState.aa
+    if local_rank == 0:
+        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation "
+              + "=" * 10, flush=True)
     with torch.no_grad(), autocast(dtype=torch.bfloat16):
         valid_epoch_loss = []
         for data in valid_dataloader:
@@ -229,12 +263,15 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     TrainingState.unbinary_ratio.append(max_unbinary_ratio)
     wandb.log({'unbinary_ratio': max_unbinary_ratio})
 
+    if local_rank == 0:
+        print(f"Remaining Unbinary Weight: {max_unbinary_ratio * 100:.2f} % ")
+
 
 # %% early stop methods
-# call back at the end of each epoch
-# push kk and rewind model state
 def kk_callback(config: Config = Config()) -> None:
-    """kk Callback Function"""
+    """kk Callback Function:
+    Call back at the end of each epoch.
+    Push kk and rewind model state."""
     current_epoch = TrainingState.epoch
 
     # adjust gamma
@@ -283,11 +320,19 @@ def kk_callback(config: Config = Config()) -> None:
             aa = torch.tensor([1.], dtype=kk.dtype, device=device)
 
         # stage 1
-        if kk < 100:
+        if kk < config.kk_threshold:
             TrainingState.model.set_kk_stage1(torch.tensor([kk, aa], dtype=kk.dtype, device=device))
         # stage 2
         else:
             TrainingState.model.set_kk_stage2(torch.tensor(config.ratio, dtype=kk.dtype, device=device))
+
+        # record changes
+        kk = TrainingState.model.state_dict()['layers.0.attention.wq.kk']
+        aa = TrainingState.model.state_dict()['layers.0.attention.wq.aa']
+        TrainingState.kk = kk
+        TrainingState.aa = aa
+        wandb.log({'kk': kk})
+        wandb.log({'aa': aa})
 
         # initialize temporary parameters
         TrainingState.best_epoch = 0
@@ -296,20 +341,46 @@ def kk_callback(config: Config = Config()) -> None:
         TrainingState.temp_unbinary_ratio = []
 
 
-# %% main
+# %% main function
 def main(config: Config = Config()) -> None:
     # initialize
     wandb.init(project='binary-llama')
     wandb.config.update(config)
     os.makedirs(config.save_path, exist_ok=True)
 
+    # show platform information
+    if local_rank == 0:
+        print("=" * 20, "Platform Information", "=" * 20)
+        cpu_model = platform.processor()
+        memory_info = psutil.virtual_memory()
+        total_memory_gb = memory_info.total / (1024 ** 3)
+        memory_usage_percent = memory_info.percent
+        cpu_threads = psutil.cpu_count(logical=True)
+        cpu_usage = psutil.cpu_percent(interval=1)
+        print(f"CPU: {cpu_model}")
+        print(f"Memory: {total_memory_gb:.2f} GB")
+        print(f"Memory usage: {memory_usage_percent:.2f}%")
+        print(f"CPU threads: {cpu_threads}")
+        print(f"CPU usage: {cpu_usage}%\n")
+        gpus = GPUtil.getGPUs()
+        i = 0
+        for gpu in gpus:
+            print(f"GPU{i}: {gpu.name}")
+            print(f"Memory Total: {gpu.memoryTotal / 1024:.2f} GB")
+            i += 1
+        GPUtil.showUtilization()
+
     # prepare model
+    if local_rank == 0:
+        print("=" * 20, "Preparing Model", "=" * 20)
     set_up(config)
 
     # check if resume
     ckpt_files = glob(f'{config.save_path}/*.pt', recursive=True)
     latest_checkpoint = max(ckpt_files, key=lambda x: int(re.search(r'(\d+)', x).group(1)), default=None)
     if latest_checkpoint:
+        if local_rank == 0:
+            print("=" * 20, f"Resume from {latest_checkpoint}", "=" * 20)
         checkpoint = torch.load(latest_checkpoint)['train_state']
         for attr in TrainingState.__dict__.keys():
             setattr(TrainingState, attr, checkpoint[attr])
@@ -341,15 +412,23 @@ def main(config: Config = Config()) -> None:
     current_unbinary_ratio = 1.
     model = TrainingState.model
     model.to(device)
-    llama_model = TrainingState.llama_model
-    llama_model.to(device)
-    llama_model.eval()  # set initial llama model evaluation only
+    # llama_model = TrainingState.llama_model
+    # llama_model.to(device)
+    # llama_model.eval()  # set initial llama model evaluation only
 
     # make ddp model
-    TrainingState.llama_model = DDP(llama_model, device_ids=[local_rank], output_device=local_rank)
+    # TrainingState.llama_model = DDP(llama_model, device_ids=[local_rank], output_device=local_rank)
     TrainingState.model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    while current_unbinary_ratio > 0.005:
+    # run training
+    while current_unbinary_ratio > config.unbinary_ratio_threshold:
+        if local_rank == 0:
+            kk = TrainingState.kk
+            if kk < config.kk_threshold:
+                print("=" * 20, "Training Stage 1", "=" * 20)
+            else:
+                print("=" * 20, "Training Stage 2", "=" * 20)
+
         training(train_dataloader, config)
         validation(valid_dataloader, config)
         kk_callback(config)
