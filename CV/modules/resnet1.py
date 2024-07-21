@@ -20,8 +20,8 @@ class Block(nn.Module):
         downsample=None,
     ):
         super().__init__()
-        self.binW=binW
-        self.binA=binA
+        self.binW = binW
+        self.binA = binA
         self.conv1 = (
             nn.Conv2d(in_channel, out_channel, 3, stride, 1, bias=False)
             if not binW
@@ -54,11 +54,14 @@ class Block(nn.Module):
 
 
 class ResNet(Base):
-    def __init__(self, binW, num_class=10,binA=False):
+    def __init__(self, binW, num_class=10, binA=False):
         super().__init__(binW, binA)
-        self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
+        self.preprocess = nn.Sequential(
+            nn.Conv2d(3, 64, 7, 2, 3, bias=False),  # (bs,3,224,224) -> (bs,64,112,112)
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(3, 2, 1),  # (bs,64,112,112) -> (bs,64,56,56)
+        )
         self.block1 = self._resblock(64, 64, 2)
         self.block2 = self._resblock(64, 128, 2, 2)
         self.block3 = self._resblock(128, 256, 2, 2)
@@ -66,12 +69,14 @@ class ResNet(Base):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512, num_class)
 
-        for mod in self.modules():
-            if isinstance(mod, (nn.Conv2d, layers.BinaryConv2D)):
-                nn.init.kaiming_normal_(mod.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(mod, nn.BatchNorm2d):
-                nn.init.constant_(mod.weight, 1)
-                nn.init.constant_(mod.bias, 0)
+        for module in self.modules():
+            if isinstance(module, (nn.Conv2d, layers.BinaryConv2D)):
+                nn.init.kaiming_normal_(
+                    module.weight, mode="fan_out", nonlinearity="relu"
+                )
+            elif isinstance(module, nn.BatchNorm2d):
+                nn.init.constant_(module.weight, 1)
+                nn.init.constant_(module.bias, 0)
 
     def _resblock(self, in_channel, out_channel, blocks, stride=1):
         downsample = None
@@ -83,10 +88,8 @@ class ResNet(Base):
                 )
                 if not self.binW
                 else nn.Sequential(
-                        layers.BinaryConv2D(
-                            in_channel, out_channel, 1, stride, padding=0
-                        ),
-                        nn.BatchNorm2d(out_channel),
+                    layers.BinaryConv2D(in_channel, out_channel, 1, stride, padding=0),
+                    nn.BatchNorm2d(out_channel),
                 )
             )
 
@@ -107,9 +110,7 @@ class ResNet(Base):
         return nn.Sequential(*boks)
 
     def forward(self, x: torch.Tensor):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
+        x = self.preprocess(x)
 
         x = self.block1(x)
         x = self.block2(x)
@@ -120,7 +121,6 @@ class ResNet(Base):
         x = torch.flatten(x, 1)
 
         return self.fc(x)
-
 
 
 if __name__ == "__main__":
