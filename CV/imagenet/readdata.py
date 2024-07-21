@@ -4,6 +4,9 @@ from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data.sampler import SubsetRandomSampler
 from modules.cutout import Cutout
+from transform_lmdb import ImageFolderLMDB
+from torch.utils.data import DataLoader
+from torchvision.transforms import Resize
 
 def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,subset=True):
     """
@@ -70,3 +73,16 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,subset=True):
             num_workers=num_workers)
 
     return train_loader,valid_loader,test_loader
+
+
+
+
+if __name__ == "__main__":
+    transform = Resize((224, 224))
+    path = "/data/home/wwang/projs/binary/data/imagenet/train.lmdb"
+    dataset = ImageFolderLMDB(path, transform)
+    data_loader = DataLoader(dataset, batch_size=256, num_workers=10)
+    for img, label in data_loader:
+        # pass
+        print(img.shape)
+        print(label.shape)
