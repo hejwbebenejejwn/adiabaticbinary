@@ -121,4 +121,4 @@ def folder2lmdb(dpath, name="train", write_frequency=5000):
 if __name__ == "__main__":
     # generate lmdb
     folder2lmdb("/data/home/wwang/projs/binary/data/imagenet/", name="train")
-    folder2lmdb("/home/jiang/dataset/imagenet/", name="val")
+    folder2lmdb("/data/home/wwang/projs/binary/data/imagenet/", name="val")

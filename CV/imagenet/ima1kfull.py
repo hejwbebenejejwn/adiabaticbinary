@@ -26,7 +26,7 @@ def fit(model: resnet1.ResNet, optim, lossfunc, trainloader: DataLoader):
     model.train()
     totalloss = 0
     for data, target in trainloader:
-        data, target = data.cuda(), target.cuda()
+        data, target = torch.tensor(data).cuda(), target.cuda()
         optim.zero_grad()
         output = model(data)
         loss = lossfunc(output, target)
@@ -47,7 +47,7 @@ def evaluate(
     total = 0
     with torch.no_grad():
         for inputs, labels in val_loader:
-            inputs, labels = inputs.cuda(), labels.cuda()
+            inputs, labels = torch.tensor(inputs).cuda(), labels.cuda()
             outputs = model(inputs)
             loss += lossfunc(outputs, labels).item() * inputs.size(0)
             _, predicted_top1 = torch.max(outputs, 1)
@@ -86,7 +86,7 @@ min_val_loss1=min_val_loss
 print(f"init: val_loss: {min_val_loss}, top1_acc:{val_acc1}, top5_acc:{val_acc5}")
 
 for epoch in range(100):
-    if counter / 10 == 1:
+    if counter / 7 == 1:
         counter = 0
         lr *= 0.5
         print(GREEN + f"lr reduced to {lr}" + RESET)

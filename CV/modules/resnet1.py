@@ -56,6 +56,12 @@ class Block(nn.Module):
 class ResNet(Base):
     def __init__(self, binW, num_class=10, binA=False):
         super().__init__(binW, binA)
+        self.bn0 = nn.BatchNorm2d(3, eps=0)
+        self.bn0.weight.data = torch.tensor([1 / 0.229, 1 / 0.224, 1 / 0.225])
+        self.bn0.bias.data = torch.tensor(
+            [-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225]
+        )
+        self.bn0.training = False  # Make sure the BatchNorm layer is not trainable
         self.preprocess = nn.Sequential(
             nn.Conv2d(3, 64, 7, 2, 3, bias=False),  # (bs,3,224,224) -> (bs,64,112,112)
             nn.BatchNorm2d(64),
@@ -110,6 +116,7 @@ class ResNet(Base):
         return nn.Sequential(*boks)
 
     def forward(self, x: torch.Tensor):
+        x = self.bn0(x)
         x = self.preprocess(x)
 
         x = self.block1(x)
