@@ -57,7 +57,6 @@ class BasicBlock(nn.Module):
 
 class ResNet(Base):
     def __init__(self, binW, num_class=10, binA=False):
-    def __init__(self, binW, num_class=10, binA=False):
         super().__init__(binW, binA)
         self.conv1 = nn.Conv2d(3, 64, 7, 2, 3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)

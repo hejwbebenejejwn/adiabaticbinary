@@ -86,7 +86,7 @@ min_val_loss1=min_val_loss
 print(f"init: val_loss: {min_val_loss}, top1_acc:{val_acc1}, top5_acc:{val_acc5}")
 
 for epoch in range(100):
-    if counter / 7 == 1:
+    if counter / 10 == 1:
         counter = 0
         lr *= 0.5
         print(GREEN + f"lr reduced to {lr}" + RESET)
