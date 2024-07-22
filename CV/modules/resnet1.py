@@ -22,6 +22,8 @@ class BasicBlock(nn.Module):
         super().__init__()
         self.binW = binW
         self.binA = binA
+        self.binW = binW
+        self.binA = binA
         self.conv1 = (
             nn.Conv2d(in_channel, out_channel, 3, stride, 1, bias=False)
             if not binW
@@ -55,6 +57,7 @@ class BasicBlock(nn.Module):
 
 class ResNet(Base):
     def __init__(self, binW, num_class=10, binA=False):
+    def __init__(self, binW, num_class=10, binA=False):
         super().__init__(binW, binA)
         self.conv1 = nn.Conv2d(3, 64, 7, 2, 3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
@@ -67,12 +70,14 @@ class ResNet(Base):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512,num_class)
 
-        for mod in self.modules():
-            if isinstance(mod, (nn.Conv2d, layers.BinaryConv2D)):
-                nn.init.kaiming_normal_(mod.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(mod, nn.BatchNorm2d):
-                nn.init.constant_(mod.weight, 1)
-                nn.init.constant_(mod.bias, 0)
+        for module in self.modules():
+            if isinstance(module, (nn.Conv2d, layers.BinaryConv2D)):
+                nn.init.kaiming_normal_(
+                    module.weight, mode="fan_out", nonlinearity="relu"
+                )
+            elif isinstance(module, nn.BatchNorm2d):
+                nn.init.constant_(module.weight, 1)
+                nn.init.constant_(module.bias, 0)
 
     def _resblock(self, in_channel, out_channel, blocks, stride=1):
         downsample = None
@@ -84,6 +89,8 @@ class ResNet(Base):
                 )
                 if not self.binW
                 else nn.Sequential(
+                    layers.BinaryConv2D(in_channel, out_channel, 1, stride, padding=0),
+                    nn.BatchNorm2d(out_channel),
                     layers.BinaryConv2D(in_channel, out_channel, 1, stride, padding=0),
                     nn.BatchNorm2d(out_channel),
                 )
