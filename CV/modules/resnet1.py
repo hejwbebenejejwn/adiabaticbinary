@@ -90,8 +90,6 @@ class ResNet(Base):
                 else nn.Sequential(
                     layers.BinaryConv2D(in_channel, out_channel, 1, stride, padding=0),
                     nn.BatchNorm2d(out_channel),
-                    layers.BinaryConv2D(in_channel, out_channel, 1, stride, padding=0),
-                    nn.BatchNorm2d(out_channel),
                 )
             )
 
