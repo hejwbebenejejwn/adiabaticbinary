@@ -14,14 +14,13 @@ MAGENTA = "\033[95m"
 
 
 from modules import resnet1
+from modules.layers import BinaryConv2D
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
 from readdata import read_dataset
-import wandb
 
-# wandb.login(key="86d6482d3fd7abdbe5d578208634a88905840ce9")
 device = torch.device("cuda")
 
 
@@ -65,11 +64,15 @@ def evaluate(
 
 
 model = resnet1.ResNet(True, 1000, False)
-dicfull = torch.load(os.path.join(CHECKPOINTS_DIR, "lr000039kk15acc54.pth"))
-dicfull = {k.replace('module.',''):v for k,v in dicfull.items()}
+dicfull = torch.load(os.path.join(CHECKPOINTS_DIR, "full.pth"))
+dicfull = {k.replace("module.", ""): v for k, v in dicfull.items()}
 dicbin = model.state_dict()
 dicbin.update(dicfull)
 model.load_state_dict(dicbin)
+for module in model.modules():
+    if isinstance(module, BinaryConv2D):
+        with torch.no_grad():
+            module.weight.copy_(torch.atanh(module.weight))
 
 if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)
@@ -87,9 +90,8 @@ wb = False
 
 target_acc = 0.67
 mepoch = 99999999
-mstep_kk = 25
-mstep_lr = 3
-lr = .1/256
+mstep_lr = 5
+lr = 0.001
 kk_mul = 1.5
 
 _, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
@@ -106,109 +108,119 @@ if binbest1 >= target_acc:
     print(RED + "target acc already reached" + RESET)
     sys.exit(0)
 
-step_kk = 0
 step_lr = 0
 val_loss_best = np.inf
 val_top1_best = 0
+last_best = 0
+last_last_best = 0
 val_top5_best = 0
+targ_reduce = False
 
 for epoch in range(mepoch):
-    if step_lr / mstep_lr  == 1:
+    if step_lr / mstep_lr == 1:
         step_lr = 0
-        lr *= 0.5
-        print(GREEN + f"lr reduced to {lr}" + RESET)
-    optim = torch.optim.SGD(model.parameters(), lr, 0.9, weight_decay=5e-4)
+        if last_last_best == val_top1_best:
+            val_acc1 = target_acc = val_top1_best
+            print(RED + f"reduce target acc to {target_acc}" + RESET)
+            targ_reduce = True
+        else:
+            lr *= 0.5
+            print(GREEN + f"lr reduced to {lr}" + RESET)
+        last_last_best = last_best
+        last_best = val_top1_best
 
-    train_loss = fit(model, optim, lossfunc, train_loader)
-    val_loss, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
+    if not targ_reduce:
+        optim = torch.optim.SGD(model.parameters(), lr, 0.9, weight_decay=5e-4)
 
-    if val_loss < val_loss_best:
-        step_kk -= step_lr + 1
-        step_lr = 0
-        val_loss_best = val_loss
-    else:
-        step_lr += 1
+        train_loss = fit(model, optim, lossfunc, train_loader)
+        val_loss, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
 
-    model.module.toBin()
-    bin_loss, bintop1, bintop5 = evaluate(model, val_loader, lossfunc)
-    if binbest1 < bintop1:
-        binbest1 = bintop1
-        binbest5 = bintop5
-        _, testtop1, testtop5 = evaluate(model, test_loader, lossfunc)
-        print(BLUE + f"test perf, top1:{testtop1}, top5:{testtop5}" + RESET)
-        model.module.quitBin()
+        if val_loss < val_loss_best:
+            step_lr = 0
+            val_loss_best = val_loss
+        else:
+            step_lr += 1
+
+        model.module.toBin()
+        bin_loss, bintop1, bintop5 = evaluate(model, val_loader, lossfunc)
+        if binbest1 < bintop1:
+            binbest1 = bintop1
+            binbest5 = bintop5
+            _, testtop1, testtop5 = evaluate(model, test_loader, lossfunc)
+            print(BLUE + f"test perf, top1:{testtop1}, top5:{testtop5}" + RESET)
+            model.module.quitBin()
+            torch.save(
+                model.state_dict(),
+                os.path.join(CHECKPOINTS_DIR, "binbest.pth"),
+            )
+        else:
+            model.module.quitBin()
+
+        if binbest1 > target_acc:
+            print(RED + "target acc reached" + RESET)
+            break
+
+        if val_top1_best < val_acc1:
+            val_top1_best = val_acc1
+            val_top5_best = val_acc5
+            torch.save(model.state_dict(), os.path.join(CHECKPOINTS_DIR, "temp.pth"))
+               
         torch.save(
             model.state_dict(),
-            os.path.join(CHECKPOINTS_DIR, "binbest.pth"),
+            os.path.join(CHECKPOINTS_DIR, f"ep{epoch}.pth"),
+            )
+        print(
+            "epoch",
+            epoch + 1,
+            "train_loss",
+            train_loss,
+            "val_loss",
+            val_loss,
+            "val_top1",
+            val_acc1,
+            "val_top5",
+            val_acc5,
+            "bin_top1",
+            bintop1,
+            "bin_top5",
+            bintop5,
+            "steplr",
+            step_lr,
+            "lr",
+            round(lr, 5),
+            "kk",
+            round(model.module.get_kk(), 3),
+            "tg",
+            round(target_acc, 3),
         )
-    else:
-        model.module.quitBin()
-
-    if binbest1 > target_acc:
-        print(RED + "target acc reached" + RESET)
-        break
-
-    if val_top1_best < val_acc1:
-        val_top1_best = val_acc1
-        val_top5_best = val_acc5
-        torch.save(model.state_dict(), os.path.join(CHECKPOINTS_DIR, "temp.pth"))
-    if step_kk >= mstep_kk:
-        val_acc1 = target_acc = val_top1_best
-        val_acc5 = val_top5_best
-        val_top1_best = 0
-        step_kk = 0
-        print(RED + f"reduce target acc to {target_acc}" + RESET)
-
-    print(
-        "epoch",
-        epoch + 1,
-        "train_loss",
-        train_loss,
-        "val_loss",
-        val_loss,
-        "val_top1",
-        val_acc1,
-        "val_top5",
-        val_acc5,
-        "bin_top1",
-        bintop1,
-        "bin_top5",
-        bintop5,
-        "steplr",
-        step_lr,
-        "step_kk",
-        step_kk,
-        "lr",
-        round(lr, 5),
-        "kk",
-        round(model.module.get_kk(), 3),
-        "tg",
-        round(target_acc, 3),
-    )
-    if wb:
-        wb.log(
-            {
-                "epoch": epoch + 1,
-                "train loss": train_loss,
-                "val top1": val_acc1,
-                "val top5": val_acc5,
-                "bin top1": bintop1,
-                "bin top5": bintop5,
-                "lr": round(lr, 5),
-                "kk": round(model.get_kk(), 3),
-                "tg": round(target_acc, 3),
-            }
-        )
+        if wb:
+            wb.log(
+                {
+                    "epoch": epoch + 1,
+                    "train loss": train_loss,
+                    "val top1": val_acc1,
+                    "val top5": val_acc5,
+                    "bin top1": bintop1,
+                    "bin top5": bintop5,
+                    "lr": round(lr, 5),
+                    "kk": round(model.get_kk(), 3),
+                    "tg": round(target_acc, 3),
+                }
+            )
     if val_acc1 >= target_acc - 1e-4:
+        last_best = last_last_best = val_top1_best = 0
         model.load_state_dict(torch.load(os.path.join(CHECKPOINTS_DIR, "temp.pth")))
-        step_kk = step_lr = val_top1_best = 0
+        step_lr = 0
         val_loss_best = np.inf
-        lr = 0.1
         while val_acc1 > target_acc - 1e-4:
             model.module.set_kk(model.module.get_kk() * kk_mul)
-            _, val_acc1, val_acc5 = evaluate(model,val_loader,lossfunc)
-        print(YELLOW + f"push kk to {model.module.get_kk()}, top1:{val_acc1}, top5:{val_acc5}" + RESET)
-    else:
-        step_kk += 1
+            _, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
+        print(
+            YELLOW
+            + f"push kk to {model.module.get_kk()}, top1:{val_acc1}, top5:{val_acc5}"
+            + RESET
+        )
+        targ_reduce=False
+        val_top5_best=0
 if wb:
     wb.finish()

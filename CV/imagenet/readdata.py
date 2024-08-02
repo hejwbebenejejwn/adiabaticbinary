@@ -15,24 +15,17 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,subset=True):
     
     transform_train = transforms.Compose([
         transforms.Resize((224,224)),
-        transforms.RandomCrop(224, padding=4), 
-        transforms.RandomHorizontalFlip(), 
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]), 
-        Cutout(1,64)
     ])
 
-    transform_test = transforms.Compose([
-        transforms.Resize((224,224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
-    ])
 
 
     if subset:
-        pic_path='D:/usr14/project/Binary/imagenet1/subset'
+        pic_path='/data/home/wwang/projs/binary/data/imagenetsub/trainimasub'
+        test_path=''
         dataset=datasets.ImageFolder(pic_path,transform_train)
-        valset=datasets.ImageFolder(pic_path,transform_test)
+        valset=datasets.ImageFolder(test_path,transform_train)
 
         num_samples=len(dataset)
         indices=list(range(num_samples))
@@ -52,8 +45,8 @@ def read_dataset(batch_size=16,valid_size=0.2,num_workers=0,subset=True):
         train_path="/data/home/wwang/projs/binary/data/imagenet/train"
         test_path="/data/home/wwang/projs/binary/data/imagenet/val"
         trainset=datasets.ImageFolder(train_path,transform_train)
-        valset=datasets.ImageFolder(train_path,transform_test)
-        testset=datasets.ImageFolder(test_path,transform_test)
+        valset=datasets.ImageFolder(train_path,transform_train)
+        testset=datasets.ImageFolder(test_path,transform_train)
 
         num_samples=len(trainset)
         indices=list(range(num_samples))
