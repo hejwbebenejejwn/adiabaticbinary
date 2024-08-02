@@ -61,7 +61,7 @@ def evaluate(
     return loss, acc_top1, acc_top5
 
 
-model = resnet1.ResNet(False, 1000, False)
+model = resnet1.ResNet(False, 100, False)
 lossfunc = nn.CrossEntropyLoss().to(device)
 train_loader, val_loader, test_loader = read_dataset(128, subset=False, num_workers=16)
 
@@ -79,13 +79,13 @@ else:
     print("Using single GPU")
 
 
-model.load_state_dict(torch.load(os.path.join(CHECKPOINTS_DIR,"pre1full.pth")))
+# model.load_state_dict(torch.load(os.path.join(CHECKPOINTS_DIR,"pre1full.pth")))
 
 min_val_loss,val_acc1,val_acc5=evaluate(model,test_loader,lossfunc)
 min_val_loss1=min_val_loss
 print(f"init: val_loss: {min_val_loss}, top1_acc:{val_acc1}, top5_acc:{val_acc5}")
 
-for epoch in range(100):
+for epoch in range(200):
     if counter / 10 == 1:
         counter = 0
         lr *= 0.5
@@ -100,7 +100,7 @@ for epoch in range(100):
         min_val_loss = val_loss
         print(MAGENTA + f"val loss reduced to {min_val_loss},lr {lr}" + RESET)
         counter = 0
-        torch.save(model.state_dict(), os.path.join(CHECKPOINTS_DIR,"pre1full.pth"))
+        torch.save(model.state_dict(), os.path.join(CHECKPOINTS_DIR,"pre2full.pth"))
         with open("lr", "w") as file:
             file.write(f"lr={lr}")
     else:
