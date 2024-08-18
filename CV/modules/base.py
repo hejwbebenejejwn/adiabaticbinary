@@ -54,10 +54,10 @@ class Base(nn.Module, ABC):
         assert self._state == "N", "already binary"
         if self.binW:
             self._kknow = self.get_kk()
-            self.set_kk(1e6)
+            self.set_kk(1e7)
         if self.binA:
             self._kanow = self.get_ka()
-            self.set_ka(1e6)
+            self.set_ka(1e7)
         self._state = "B"
         return self._kknow, self._kanow
 

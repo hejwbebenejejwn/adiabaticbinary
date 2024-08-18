@@ -88,11 +88,11 @@ train_loader, val_loader, test_loader = read_dataset(128, subset=False, num_work
 # wb = wandb.init(project="imagenet1k binary", name="first run", reinit=True)
 wb = False
 
-target_acc = 0.67
+target_acc = 0.69
 mepoch = 99999999
 mstep_lr = 5
 lr = 0.001
-kk_mul = 1.5
+kk_mul = 5
 
 _, val_acc1, val_acc5 = evaluate(model, val_loader, lossfunc)
 print(f"last fullbest, top1:{val_acc1}, top5:{val_acc5}")
@@ -109,25 +109,23 @@ if binbest1 >= target_acc:
     sys.exit(0)
 
 step_lr = 0
+lr_reduced=0
 val_loss_best = np.inf
 val_top1_best = 0
-last_best = 0
-last_last_best = 0
 val_top5_best = 0
 targ_reduce = False
 
 for epoch in range(mepoch):
     if step_lr / mstep_lr == 1:
         step_lr = 0
-        if last_last_best == val_top1_best:
+        if lr_reduced==1:
             val_acc1 = target_acc = val_top1_best
             print(RED + f"reduce target acc to {target_acc}" + RESET)
             targ_reduce = True
         else:
             lr *= 0.5
+            lr_reduced+=1
             print(GREEN + f"lr reduced to {lr}" + RESET)
-        last_last_best = last_best
-        last_best = val_top1_best
 
     if not targ_reduce:
         optim = torch.optim.SGD(model.parameters(), lr, 0.9, weight_decay=5e-4)
@@ -208,7 +206,8 @@ for epoch in range(mepoch):
                 }
             )
     if val_acc1 >= target_acc - 1e-4:
-        last_best = last_last_best = val_top1_best = 0
+        lr_reduced=0
+        val_top1_best = 0
         model.load_state_dict(torch.load(os.path.join(CHECKPOINTS_DIR, "temp.pth")))
         step_lr = 0
         val_loss_best = np.inf

@@ -33,7 +33,7 @@ class BinaryConv2D(nn.Module):
             self.kk.fill_(kk_new)
 
     def forward(self, x):
-        if self.kk.item() < 1e5:
+        if self.kk.item() < 1e6:
             weight = (
                 torch.tanh(self.weight * self.kk) + self.ker_bias
                 if self.ker_bias is not None
@@ -57,7 +57,7 @@ class BinaryConv2DCL(BinaryConv2D):
         self.reg_loss = None
 
     def forward(self, x):
-        if self.kk.item() < 1e5:
+        if self.kk.item() < 1e6:
             weight = (
                 torch.tanh(self.weight * self.kk) + self.ker_bias
                 if self.ker_bias is not None
@@ -88,7 +88,7 @@ class BinaryDense(nn.Module):
             self.kk.fill_(kk_new)
 
     def forward(self, inputs):
-        if self.kk < 1e5:
+        if self.kk < 1e6:
             return self.nmk * F.linear(
                 inputs, torch.tanh(self.weight * self.kk), self.bias
             )
@@ -108,7 +108,7 @@ class BinaryActivation(nn.Module):
             self.kk.fill_(kk_new)
 
     def forward(self, inputs):
-        if self.kk < 1e5:
+        if self.kk < 1e6:
             return torch.tanh(inputs * self.kk) + self.bias
         else:
             return torch.sign(inputs) + self.bias
@@ -119,7 +119,7 @@ class BinaryActivationHT(BinaryActivation):
         super().__init__(ker_bias)
 
     def forward(self, inputs):
-        if self.kk < 1e5:
+        if self.kk < 1e6:
             return torch.clip(inputs * self.kk, min=-1, max=1) + self.bias
         else:
             return torch.sign(inputs) + self.bias
@@ -131,7 +131,7 @@ class BinaryActivationRL(BinaryActivation):
         self.bias = nn.Parameter(torch.Tensor([0.0]), requires_grad=ker_bias)
 
     def forward(self, inputs):
-        if self.kk < 1e5:
+        if self.kk < 1e6:
             return torch.tanh(torch.relu(inputs) * self.kk) + self.bias
         else:
             return torch.sign(inputs) / 2 + (0.5 + self.bias)
