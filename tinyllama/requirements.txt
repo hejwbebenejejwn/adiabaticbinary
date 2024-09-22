@@ -1,0 +1,9 @@
+GPUtil
+blobfile
+fairscale
+fire
+huggingface-hub
+tiktoken==0.4.0
+torch
+wandb
+zstandard

@@ -2,5 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/tinyllama/models/TinyLlama-1.1B-Chat-v0.4" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/tinyllama/models/TinyLlama-1.1B-intermediate-step-715k-1.5T" vcs="Git" />
   </component>
 </project>
