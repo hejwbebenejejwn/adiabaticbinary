@@ -8,5 +8,14 @@ wandb/
 llama3/task.pbs
 llama3/task.sh
 llama3/train.sh
-llama3/datasets/
+llama3/datasets/SlimPajama-627B
+llama3/datasets/tokenized
 llama3/models/
+
+# binary tiny paths to ignore
+tinyllama/task.pbs
+tinyllama/task.sh
+tinyllama/train.sh
+tinyllama/datasets/SlimPajama-627B
+tinyllama/datasets/tokenized
+tinyllama/models/
