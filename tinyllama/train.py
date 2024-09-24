@@ -65,10 +65,11 @@ class TrainingState:
 def set_up(config: Config) -> None:
     """Build model and Initialize optimizer & learning rate scheduler"""
     llama_config = LlamaConfig.from_pretrained(Config.full_ckpt_dir)
+    llama_config.torch_dtype = config.dtype
     ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name)
     # build binary model
     print(f"Initializing Binary Model...(with dtype: {config.dtype})")
-    binary_model = BinaryLlamaForCausalLM(llama_config)
+    binary_model = BinaryLlamaForCausalLM(llama_config).to(dtype=config.dtype)
     for key, value in binary_model.state_dict().items():
         value = value.to(config.dtype)
         if key.endswith('.kk') or key.endswith('.aa') or key.endswith('.inv_freq'):
@@ -78,8 +79,8 @@ def set_up(config: Config) -> None:
         else:
             raise KeyError(f"{key} not found in pretrained model.")
     # build tinyllama model
-    print("Initializing Full Precision Model...")
-    full_model = LlamaForCausalLM(llama_config)
+    print(f"Initializing Full Precision Model...(with dtype: {config.dtype})")
+    full_model = LlamaForCausalLM(llama_config).to(dtype=config.dtype)
     for key, value in full_model.state_dict().items():
         value = value.to(config.dtype)
         if key.endswith('.inv_freq'):

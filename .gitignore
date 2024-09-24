@@ -4,6 +4,9 @@
 **/*.pt
 wandb/
 
+# IDEs
+*/.idea
+
 # binary llama3 paths to ignore
 llama3/task.pbs
 llama3/task.sh
