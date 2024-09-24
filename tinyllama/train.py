@@ -67,9 +67,10 @@ def set_up(config: Config) -> None:
     llama_config = LlamaConfig.from_pretrained(Config.full_ckpt_dir)
     ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name)
     # build binary model
-    print("Initializing Binary Model...")
+    print(f"Initializing Binary Model...(with dtype: {config.dtype})")
     binary_model = BinaryLlamaForCausalLM(llama_config)
     for key, value in binary_model.state_dict().items():
+        value = value.to(config.dtype)
         if key.endswith('.kk') or key.endswith('.aa') or key.endswith('.inv_freq'):
             continue
         elif key in ckpt_state_dict.keys():
@@ -80,6 +81,7 @@ def set_up(config: Config) -> None:
     print("Initializing Full Precision Model...")
     full_model = LlamaForCausalLM(llama_config)
     for key, value in full_model.state_dict().items():
+        value = value.to(config.dtype)
         if key.endswith('.inv_freq'):
             continue
         elif key in ckpt_state_dict.keys():
@@ -114,13 +116,13 @@ def training_step(batch, config: Config) -> torch.Tensor:
 
     binary_model_outputs = binary_model.forward(input_tokens)
     binary_logits = binary_model_outputs.logits
-    binary_logits = binary_logits.to(device=device, dtype=torch.float32).view(-1, binary_logits.size(-1))
-    binary_kd_probs = torch.softmax(binary_logits / kd_temperature, dim=-1).to(device=device, dtype=torch.float32)
+    binary_logits = binary_logits.view(-1, binary_logits.size(-1))
+    binary_kd_probs = torch.softmax(binary_logits / kd_temperature, dim=-1)
     binary_kd_probs = binary_kd_probs.view(-1, binary_kd_probs.size(-1))
 
     full_logits = full_model.forward(input_tokens).logits
-    full_logits = full_logits.to(device=device, dtype=torch.float32).view(-1, binary_logits.size(-1))
-    full_kd_probs = torch.softmax(full_logits / kd_temperature, dim=-1).to(device=device, dtype=torch.float32)
+    full_logits = full_logits.view(-1, binary_logits.size(-1))
+    full_kd_probs = torch.softmax(full_logits / kd_temperature, dim=-1)
     full_kd_probs = full_kd_probs.view(-1, full_kd_probs.size(-1))
 
     # logit KD loss
@@ -151,7 +153,7 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
     train_epoch_loss = []
     for i, data in enumerate(train_dataloader):
         data = data.to(device, non_blocking=True)
-        with autocast(dtype=torch.bfloat16):
+        with autocast(dtype=torch.float16):
             train_loss = training_step(data, config) / config.accum_batches
         scaler.scale(train_loss).backward()
 
@@ -199,7 +201,7 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     if local_rank == 0:
         print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation "
               + "=" * 10, flush=True)
-    with torch.no_grad(), autocast(dtype=torch.bfloat16):
+    with torch.no_grad(), autocast(dtype=torch.float16):
         valid_epoch_loss = []
         for data in valid_dataloader:
             data = data.to(device, non_blocking=True)
