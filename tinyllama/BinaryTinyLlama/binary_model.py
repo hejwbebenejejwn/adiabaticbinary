@@ -1,19 +1,17 @@
 from typing import List, Optional, Tuple, Union
 
 import torch
-import torch.utils.checkpoint
 import torch.nn as nn
+import torch.utils.checkpoint
 from torch.nn import CrossEntropyLoss
-
 from transformers import LlamaPreTrainedModel
+from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.models.llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, _make_causal_mask, _expand_mask
-from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.utils import logging
 
 from tinyllama.BinaryTinyLlama.binary_functions import BinaryLinearFunction
 from tinyllama.BinaryTinyLlama.binary_layers import BinaryLinear, BinaryLlamaDecoderLayer
-
 
 logger = logging.get_logger(__name__)
 
@@ -196,7 +194,7 @@ class BinaryLlamaModel(LlamaPreTrainedModel):
         self.layers = nn.ModuleList([BinaryLlamaDecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-        self.gradient_checkpointing = False
+        self.gradient_checkpointing = config.gradient_checkpointing
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -322,6 +320,7 @@ class BinaryLlamaModel(LlamaPreTrainedModel):
                     attention_mask,
                     position_ids,
                     None,
+                    use_reentrant=False,
                 )
             else:
                 layer_outputs = decoder_layer(

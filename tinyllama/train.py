@@ -1,30 +1,28 @@
 import os
-from pathlib import Path
-import re
-from glob import glob
-import time
-import wandb
-import fire
-from typing import List
-from multiprocessing import cpu_count
-import psutil
 import platform
-import GPUtil
+import re
+import time
+from glob import glob
+from multiprocessing import cpu_count
+from pathlib import Path
+from typing import List
 
+import GPUtil
+import fire
+import psutil
 import torch
 import torch.nn.functional as F
+import wandb
+from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torch.cuda.amp import GradScaler, autocast
-
 from transformers import LlamaForCausalLM
 from transformers.models.llama import LlamaConfig
 
-from tinyllama.config import Config
 from BinaryTinyLlama import BinaryLlamaForCausalLM
+from tinyllama.config import Config
 from tinyllama.datasets import TokenizedDataset
-
 
 torch.set_float32_matmul_precision('medium')
 wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
@@ -65,13 +63,14 @@ class TrainingState:
 def set_up(config: Config) -> None:
     """Build model and Initialize optimizer & learning rate scheduler"""
     llama_config = LlamaConfig.from_pretrained(Config.full_ckpt_dir)
-    llama_config.torch_dtype = config.dtype
+    llama_config.gradient_checkpointing = config.gradient_checkpointing
+    llama_config.use_cache = config.use_cache
+
     ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name)
     # build binary model
-    print(f"Initializing Binary Model...(with dtype: {config.dtype})")
-    binary_model = BinaryLlamaForCausalLM(llama_config).to(dtype=config.dtype)
+    print(f"Initializing Binary Model...")
+    binary_model = BinaryLlamaForCausalLM(llama_config)
     for key, value in binary_model.state_dict().items():
-        value = value.to(config.dtype)
         if key.endswith('.kk') or key.endswith('.aa') or key.endswith('.inv_freq'):
             continue
         elif key in ckpt_state_dict.keys():
@@ -79,10 +78,9 @@ def set_up(config: Config) -> None:
         else:
             raise KeyError(f"{key} not found in pretrained model.")
     # build tinyllama model
-    print(f"Initializing Full Precision Model...(with dtype: {config.dtype})")
-    full_model = LlamaForCausalLM(llama_config).to(dtype=config.dtype)
+    print(f"Initializing Full Precision Model...")
+    full_model = LlamaForCausalLM(llama_config)
     for key, value in full_model.state_dict().items():
-        value = value.to(config.dtype)
         if key.endswith('.inv_freq'):
             continue
         elif key in ckpt_state_dict.keys():
@@ -114,8 +112,9 @@ def training_step(batch, config: Config) -> torch.Tensor:
     loss_fn2 = TrainingState.loss_fn2
 
     input_tokens = batch[:, 0:config.block_size].contiguous()
+    target_tokens = batch[:, 1:config.block_size + 1].contiguous().long()
 
-    binary_model_outputs = binary_model.forward(input_tokens)
+    binary_model_outputs = binary_model.forward(input_tokens, labels=target_tokens)
     binary_logits = binary_model_outputs.logits
     binary_logits = binary_logits.view(-1, binary_logits.size(-1))
     binary_kd_probs = torch.softmax(binary_logits / kd_temperature, dim=-1)
@@ -147,29 +146,40 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
     if local_rank == 0:
         kk = TrainingState.kk
         aa = TrainingState.aa
-        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Training "
-              + "=" * 10, flush=True)
-    start = 0
+        print(f"[GPU{local_rank}]",
+              f"Epoch {TrainingState.epoch},",
+              f"kk = {kk:.2f},",
+              f"aa = {aa:.2f}",
+              f"Training",
+              "=" * 10,
+              flush=True
+              )
 
     train_epoch_loss = []
     for i, data in enumerate(train_dataloader):
+        start = time.time()
+
         data = data.to(device, non_blocking=True)
+
         with autocast(dtype=torch.float16):
-            train_loss = training_step(data, config) / config.accum_batches
+            train_loss = training_step(data, config)
+
         scaler.scale(train_loss).backward()
 
-        if (i + 1) % config.accum_batches == 0:
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad(set_to_none=True)
-            TrainingState.accum_step += 1
-            n_accum = TrainingState.accum_step
+        scaler.step(optimizer)
+        scaler.update()
 
-            if local_rank == 0:
-                elapsed = time.time() - start
-                print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f} " +
-                      f"| Tokens/Sec: {config.max_seq_len/elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
-                start = time.time()
+        optimizer.zero_grad(set_to_none=True)
+
+        TrainingState.accum_step += 1
+        n_accum = TrainingState.accum_step
+
+        if local_rank == 0:
+            elapsed = time.time() - start
+            print(f"Epoch Step: {i + 1:6d} | Loss: {train_loss:6.2f}",
+                  f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f}",
+                  f"| Learning Rate: {lr_scheduler.get_lr()[0]:6.1e}"
+                  )
 
         train_epoch_loss.append(train_loss)
 

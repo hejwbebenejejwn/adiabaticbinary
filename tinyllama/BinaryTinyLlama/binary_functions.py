@@ -23,6 +23,9 @@ class BinaryLinearFunction(Function):
         # kk and aa always doesn't need grad
         grad_input = grad_weight = grad_bias = grad_kk = grad_aa = None
 
+        weight = weight.to(grad_output)
+        input = input.to(grad_output)
+
         if ctx.needs_input_grad[0]:
             grad_input = torch.matmul(grad_output, aa * torch.tanh((weight - weight.mean()) * kk))
         if ctx.needs_input_grad[1]:

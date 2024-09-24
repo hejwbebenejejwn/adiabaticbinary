@@ -1,25 +1,25 @@
 import os
-import re
-from glob import glob
-import time
-import wandb
-import fire
-from typing import Optional, Tuple, List
-from multiprocessing import cpu_count
-import psutil
 import platform
-import GPUtil
+import re
+import time
+from glob import glob
+from multiprocessing import cpu_count
+from typing import Optional, Tuple, List
 
+import GPUtil
+import fire
+import psutil
 import torch
 import torch.nn.functional as F
+import wandb
+from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torch.cuda.amp import GradScaler, autocast
 
-from llama import Llama, Tokenizer, Transformer
 from binary_llama import BinaryLlama, BinaryTransformer
 from datasets import TokenizedDataset
+from llama import Llama, Tokenizer, Transformer
 
 torch.set_float32_matmul_precision('medium')
 wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
@@ -198,7 +198,7 @@ def training(train_dataloader: DataLoader, config: Config = Config()) -> None:
             if local_rank == 0:
                 elapsed = time.time() - start
                 print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f} " +
-                      f"| Tokens/Sec: {config.max_seq_len/elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
+                      f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f} | Learning Rate: {lr_scheduler.get_lr():6.1e}")
                 start = time.time()
 
         train_epoch_loss.append(train_loss)
