@@ -11,11 +11,13 @@ import GPUtil
 import fire
 import psutil
 import torch
+import torch.nn.functional as F
 import wandb
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from transformers import LlamaForCausalLM
 from transformers.models.llama import LlamaConfig
 
 from BinaryTinyLlama import BinaryLlamaForCausalLM
@@ -36,7 +38,10 @@ class TrainingState:
     # model state
     llama_config: LlamaConfig
     binary_model: BinaryLlamaForCausalLM
+    full_model: LlamaForCausalLM
 
+    loss_fn1: F.cross_entropy
+    loss_fn2: F.mse_loss
     optimizer: torch.optim.Adam
     lr_scheduler: torch.optim.lr_scheduler.StepLR
 
@@ -72,13 +77,28 @@ def set_up(config: Config) -> None:
             binary_model.state_dict()[key].copy_(value)
         else:
             raise KeyError(f"{key} not found in pretrained model.")
+    # build tinyllama model
+    print(f"Initializing Full Precision Model...")
+    full_model = LlamaForCausalLM(llama_config)
+    for key, value in full_model.state_dict().items():
+        if key.endswith('.inv_freq'):
+            continue
+        elif key in ckpt_state_dict.keys():
+            full_model.state_dict()[key].copy_(value)
+        else:
+            raise KeyError(f"{key} not found in pretrained model.")
 
+    loss_fn1 = F.cross_entropy
+    loss_fn2 = F.mse_loss
     optimizer = torch.optim.Adam(binary_model.parameters(), betas=config.betas, lr=config.base_lr)
     # change base_step_size & base_gamma as current lr changes
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.base_step_size, gamma=config.base_gamma)
 
     TrainingState.binary_model = binary_model
+    TrainingState.full_model = full_model
     TrainingState.llama_config = llama_config
+    TrainingState.loss_fn1 = loss_fn1
+    TrainingState.loss_fn2 = loss_fn2
     TrainingState.optimizer = optimizer
     TrainingState.lr_scheduler = lr_scheduler
 
@@ -86,14 +106,31 @@ def set_up(config: Config) -> None:
 # %% training
 def training_step(batch, config: Config) -> torch.Tensor:
     """Training Step"""
+    kd_temperature = config.kd_temperature
     binary_model = TrainingState.binary_model
+    full_model = TrainingState.full_model
+    loss_fn2 = TrainingState.loss_fn2
 
     input_tokens = batch[:, 0:config.block_size].contiguous()
     target_tokens = batch[:, 1:config.block_size + 1].contiguous().long()
 
     binary_model_outputs = binary_model.forward(input_tokens, labels=target_tokens)
-    loss = binary_model_outputs.loss
+    binary_logits = binary_model_outputs.logits
+    binary_logits = binary_logits.view(-1, binary_logits.size(-1))
+    binary_kd_probs = torch.softmax(binary_logits / kd_temperature, dim=-1)
+    binary_kd_probs = binary_kd_probs.view(-1, binary_kd_probs.size(-1))
 
+    full_logits = full_model.forward(input_tokens).logits
+    full_logits = full_logits.view(-1, binary_logits.size(-1))
+    full_kd_probs = torch.softmax(full_logits / kd_temperature, dim=-1)
+    full_kd_probs = full_kd_probs.view(-1, full_kd_probs.size(-1))
+
+    # logit KD loss
+    loss_ce = binary_model_outputs.loss
+    loss_mse = loss_fn2(input=binary_kd_probs, target=full_kd_probs)
+    loss = loss_ce + loss_mse * config.kd_alpha
+
+    # feature KD loss
     return loss
 
 
@@ -352,8 +389,12 @@ def main(config: Config) -> None:
     current_unbinary_ratio = 1.
     binary_model = TrainingState.binary_model
     binary_model.to(device)
+    full_model = TrainingState.full_model
+    full_model.to(device)
+    full_model.eval()  # set full precision tinyllama model evaluation only
 
     # make ddp model
+    TrainingState.full_model = DDP(full_model, device_ids=[local_rank], output_device=local_rank)
     TrainingState.binary_model = DDP(binary_model, device_ids=[local_rank], output_device=local_rank)
 
     # run training
