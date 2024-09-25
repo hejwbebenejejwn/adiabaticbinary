@@ -1,17 +1,14 @@
 import math
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import torch
-from torch import Tensor
 import torch.nn as nn
-from torch.nn import Module
 import torch.nn.init as init
+from BinaryTinyLlama.binary_functions import BinaryLinearFunction
+from BinaryTinyLlama.state_storage import Config
+from torch import Tensor
+from torch.nn import Module
 from torch.nn.parameter import Parameter
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
-from tinyllama.BinaryTinyLlama.binary_functions import BinaryLinearFunction
-from tinyllama.BinaryTinyLlama.state_storage import Config
-
 from transformers.activations import ACT2FN
 from transformers.models.llama import LlamaConfig
 from transformers.models.llama.modeling_llama import (
@@ -22,7 +19,6 @@ from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
     repeat_kv,
 )
-from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.utils import logging
 
 logger = logging.get_logger(__name__)

@@ -3,15 +3,14 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
+from BinaryTinyLlama.binary_functions import BinaryLinearFunction
+from BinaryTinyLlama.binary_layers import BinaryLinear, BinaryLlamaDecoderLayer
 from torch.nn import CrossEntropyLoss
 from transformers import LlamaPreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.models.llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, _make_causal_mask, _expand_mask
 from transformers.utils import logging
-
-from tinyllama.BinaryTinyLlama.binary_functions import BinaryLinearFunction
-from tinyllama.BinaryTinyLlama.binary_layers import BinaryLinear, BinaryLlamaDecoderLayer
 
 logger = logging.get_logger(__name__)
 

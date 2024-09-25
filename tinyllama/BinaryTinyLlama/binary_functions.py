@@ -1,9 +1,8 @@
 import os
 
 import torch
+from BinaryTinyLlama.state_storage import Config
 from torch.autograd import Function
-
-from tinyllama.BinaryTinyLlama.state_storage import Config
 
 
 # %% Linear Function

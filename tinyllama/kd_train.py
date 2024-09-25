@@ -13,6 +13,7 @@ import psutil
 import torch
 import torch.nn.functional as F
 import wandb
+from datasets import TokenizedDataset
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
@@ -21,8 +22,7 @@ from transformers import LlamaForCausalLM
 from transformers.models.llama import LlamaConfig
 
 from BinaryTinyLlama import BinaryLlamaForCausalLM
-from tinyllama.config import Config
-from tinyllama.datasets import TokenizedDataset
+from config import Config
 
 torch.set_float32_matmul_precision('medium')
 wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
@@ -413,4 +413,4 @@ def main(config: Config) -> None:
 
 
 if __name__ == '__main__':
-    fire.Fire(main)
+    fire.Fire(main(Config()))
