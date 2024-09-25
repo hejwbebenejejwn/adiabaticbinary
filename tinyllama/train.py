@@ -11,6 +11,7 @@ import GPUtil
 import fire
 import psutil
 import torch
+import torch.distributed as dist
 import wandb
 from datasets import TokenizedDataset
 from torch.cuda.amp import GradScaler, autocast
@@ -283,7 +284,7 @@ def kk_callback(config: Config = Config()) -> None:
 # %% main function
 def main(config: Config) -> None:
     # initialize
-    wandb.init(project='binary-llama')
+    wandb.init(project='binary-llama', mode="offline")
     wandb.config.update(config)
     os.makedirs(config.save_dir, exist_ok=True)
 
@@ -338,6 +339,7 @@ def main(config: Config) -> None:
                                     dataset_ratio=config.dataset_ratio, mode='test', shuffle=config.shuffle,
                                     max_seq_len=config.max_seq_len, pad_id=llama_config.pad_token_id)
     # dataloaders
+    dist.init_process_group(backend='nccl')
     train_sampler = DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size,
                                   sampler=train_sampler, num_workers=cpu_count(), pin_memory=True)
