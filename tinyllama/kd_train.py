@@ -158,6 +158,8 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
 
     train_epoch_loss = []
     accumulated_loss = 0.0  # initialize for batch accumulation
+    batch_wait = 0  # initialize batch_patience
+    min_loss = float('inf')  # initialize min_loss
     for i, data in enumerate(train_dataloader):
         start = time.time()
         data = data.to(device, non_blocking=True)
@@ -181,10 +183,20 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
                 elapsed = time.time() - start
                 print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f}",
                       f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f}",
-                      f"| Learning Rate: {lr_scheduler.get_lr()[0]:6.1e}"
+                      f"| Learning Rate: {lr_scheduler.get_last_lr()[0]:6.1e}"
                       )
 
-        train_epoch_loss.append(train_loss)
+            train_epoch_loss.append(train_loss)
+            # Update min_loss if current train_loss is lower
+            if train_loss < min_loss:
+                min_loss = train_loss
+                batch_wait = 0  # reset patience counter if new min_loss found
+            else:
+                batch_wait += 1
+            # Check if we need to stop early
+            if batch_wait >= config.batch_patience:
+                print("Early stopping triggered.")
+                break
 
     GPUtil.showUtilization()
 

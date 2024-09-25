@@ -21,12 +21,13 @@ class Config:
     block_size: int = max_seq_len - 1
 
     # %% training config
+    batch_patience: int = 100
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
     kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2 (for present)
-    batch_size: int = 16
-    accum_batches: int = 1
+    batch_size: int = 8
+    accum_batches: int = 8
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100
