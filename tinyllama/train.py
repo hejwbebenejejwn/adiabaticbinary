@@ -12,6 +12,7 @@ import fire
 import psutil
 import torch
 import torch.distributed as dist
+import wandb
 from datasets import TokenizedDataset
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -21,9 +22,9 @@ from transformers.models.llama import LlamaConfig
 
 from BinaryTinyLlama import BinaryLlamaForCausalLM
 from config import Config
-from utils import log_loss_file
 
 torch.set_float32_matmul_precision('medium')
+# wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
 
 rank = int(os.environ["RANK"])
 local_rank = int(os.environ["LOCAL_RANK"])
@@ -167,7 +168,7 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
     TrainingState.epoch += 1
 
     mean_train_loss = torch.mean(torch.tensor(train_epoch_loss)).item()
-    log_loss_file(config.save_dir + "mean_train_loss.txt", mean_train_loss)
+    wandb.log({'train_loss': mean_train_loss})
 
 
 # %% validation
@@ -198,7 +199,7 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
 
     mean_valid_loss = torch.mean(torch.tensor(valid_epoch_loss)).item()
     TrainingState.temp_valid_loss_list.append(mean_valid_loss)
-    log_loss_file(config.save_dir + "mean_valid_loss.txt", mean_valid_loss)
+    wandb.log({'valid_loss': mean_valid_loss})
 
     # calculate unbinary ratio
     unbinary_ratio = []
@@ -212,7 +213,7 @@ def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
     max_unbinary_ratio = torch.max(torch.tensor(unbinary_ratio)).item()
     TrainingState.temp_unbinary_ratio.append(max_unbinary_ratio)
     TrainingState.unbinary_ratio.append(max_unbinary_ratio)
-    log_loss_file(config.save_dir + "max_unbinary_ratio.txt", max_unbinary_ratio)
+    wandb.log({'unbinary_ratio': max_unbinary_ratio})
 
     if local_rank == 0:
         print(f"Remaining Unbinary Weight: {max_unbinary_ratio * 100:.2f} % ")
@@ -282,8 +283,8 @@ def kk_callback(config: Config = Config()) -> None:
         aa = TrainingState.binary_model.state_dict()['model.layers.0.self_attn.q_proj.aa']
         TrainingState.kk = kk
         TrainingState.aa = aa
-        log_loss_file(config.save_dir + "kk.txt", kk)
-        log_loss_file(config.save_dir + "aa.txt", aa)
+        wandb.log({'kk': kk})
+        wandb.log({'aa': aa})
 
         # initialize temporary parameters
         TrainingState.best_epoch = 0
@@ -295,8 +296,9 @@ def kk_callback(config: Config = Config()) -> None:
 # %% main function
 def main(config: Config) -> None:
     # initialize
+    wandb.init(project='binary-llama', mode="offline")
+    wandb.config.update(config)
     os.makedirs(config.save_dir, exist_ok=True)
-    os.makedirs(config.result_dir, exist_ok=True)
 
     # show platform information
     if local_rank == 0:
