@@ -26,7 +26,6 @@ from BinaryTinyLlama import BinaryLlamaForCausalLM
 from config import Config
 
 torch.set_float32_matmul_precision('medium')
-wandb.login(key='86d6482d3fd7abdbe5d578208634a88905840ce9')
 
 rank = int(os.environ["RANK"])
 local_rank = int(os.environ["LOCAL_RANK"])
@@ -78,6 +77,9 @@ def set_up(config: Config) -> None:
             binary_model.state_dict()[key].copy_(value)
         else:
             raise KeyError(f"{key} not found in pretrained model.")
+    binary_model.set_kk_stage1(
+        torch.tensor([config.init_kk, config.init_aa], dtype=config.dtype, device=binary_model.device))
+
     # build tinyllama model
     print(f"Initializing Full Precision Model...")
     full_model = LlamaForCausalLM(llama_config)
@@ -302,10 +304,10 @@ def kk_callback(config: Config = Config()) -> None:
 
         # push kk and aa
         if kk < 1:
-            kk += config.aa_lr
+            kk += config.kk_lr1
             aa = 1 / kk
         else:
-            kk *= config.kk_lr
+            kk *= config.kk_lr2
             aa = torch.tensor([1.], dtype=kk.dtype, device=device)
 
         # stage 1

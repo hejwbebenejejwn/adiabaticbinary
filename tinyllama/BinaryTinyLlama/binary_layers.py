@@ -66,13 +66,13 @@ class BinaryLinear(Module):
         )
 
     # External modification of kk & aa stage 1
-    def set_kk_stage1(self, kknew):
+    def set_kk_stage1(self, kknew: Tensor):
         with torch.no_grad():
             self.kk = Parameter(kknew[0], requires_grad=False)
             self.aa = Parameter(kknew[1], requires_grad=False)
 
     # External modification of kk & aa stage 2
-    def set_kk_stage2(self, ratio):
+    def set_kk_stage2(self, ratio: Tensor):
         with torch.no_grad():
             q = (1 - ratio).float()
             weight_flatten = self.weight.flatten().abs().float()
@@ -84,10 +84,10 @@ class BinaryLinear(Module):
             # Using sampled indices to calculate quantile
             quantile_value = torch.quantile(weight_flatten[selected_indices], q).to(ratio.device, ratio.dtype)
             # Update kk
-            self.kk = Parameter(2 * torch.pow(quantile_value, -1), requires_grad=False)
+            self.kk = Parameter(2 * torch.pow(quantile_value, -1).to(ratio.device, ratio.dtype), requires_grad=False)
 
-            if self.kk < 1:
-                self.aa = Parameter(torch.pow(self.kk, -1).to(ratio.device, ratio.dtype), requires_grad=False)
+            if self.kk < 1.:
+                self.aa = Parameter(torch.pow(self.kk, -1), requires_grad=False)
             else:
                 self.aa = Parameter(torch.tensor([1.]).to(ratio.device, ratio.dtype), requires_grad=False)
 
@@ -180,10 +180,6 @@ class BinaryLlamaMLP(Module):
         self.up_proj = BinaryLinear(self.hidden_size, self.intermediate_size, bias=False)
         self.down_proj = BinaryLinear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
-
-        # Definition of binarize training parameters: kk and aa
-        self.kk = Parameter(torch.tensor(1.), requires_grad=False)
-        self.aa = Parameter(torch.tensor(1.), requires_grad=False)
 
     def forward(self, x):
         if self.pretraining_tp > 1:

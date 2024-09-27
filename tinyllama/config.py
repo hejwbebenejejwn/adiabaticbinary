@@ -17,17 +17,16 @@ class Config:
     full_ckpt_name: str = 'pytorch_model.bin'
     tokenizer_path: str = 'models/TinyLlama-1.1B-intermediate-step-715k-1.5T/tokenizer.model'
     llama_config_path: str = 'models/TinyLlama-1.1B-intermediate-step-715k-1.5T/config.json'
-    max_seq_len: int = 512
+    max_seq_len: int = 1024
     block_size: int = max_seq_len - 1
 
     # %% training config
-    batch_patience: int = 100
+    batch_patience: int = 50
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
-    kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2 (for present)
     batch_size: int = 8
-    accum_batches: int = 1
+    accum_batches: int = 8
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100
@@ -39,7 +38,10 @@ class Config:
     # %% binary KD training config
     kd_temperature: float = 10.
     kd_alpha: float = 0.1
-    aa_lr: float = 0.4
-    kk_lr: float = 1.25
+    init_kk: float = 0.5
+    init_aa: float = 1 / init_kk
+    kk_lr1: float = 0.5
+    kk_lr2: float = 1.25
+    kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2 (for present)
     ratio: float = 0.1
     patience = 15
