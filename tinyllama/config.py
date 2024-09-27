@@ -21,7 +21,7 @@ class Config:
     block_size: int = max_seq_len - 1
 
     # %% training config
-    batch_patience: int = 50
+    accum_step_patience: int = 50  # accumulation steps
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold

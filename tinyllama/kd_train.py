@@ -195,8 +195,9 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
                 batch_wait = 0  # reset patience counter if new min_loss found
             else:
                 batch_wait += 1
+            print({f"min_loss: {min_loss:6.2f}, accumulate step patience: {batch_wait}/{config.accum_step_patience}"})
             # Check if we need to stop early
-            if batch_wait >= config.batch_patience:
+            if batch_wait >= config.accum_step_patience:
                 print("Early stopping triggered.")
                 break
 
