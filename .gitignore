@@ -21,4 +21,5 @@ tinyllama/task.sh
 tinyllama/train.sh
 tinyllama/datasets/SlimPajama-627B
 tinyllama/datasets/tokenized
-tinyllama/models/
+tinyllama/models
+tinyllama/results
