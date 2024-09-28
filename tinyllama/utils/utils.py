@@ -15,7 +15,10 @@ def log_loss_file(file_path, data):
 
 
 def batch_early_stop_check(local_early_stopping):
-    stop_flag = torch.tensor(int(local_early_stopping), device='cpu')
+    local_rank = int(os.environ["LOCAL_RANK"])
+    device = torch.device(f"cuda:{local_rank}")
+
+    stop_flag = torch.tensor(int(local_early_stopping), device=device)
 
     dist.all_reduce(stop_flag, op=dist.ReduceOp.SUM)
 
