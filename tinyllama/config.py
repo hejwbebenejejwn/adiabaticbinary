@@ -17,7 +17,7 @@ class Config:
     full_ckpt_name: str = 'pytorch_model.bin'
     tokenizer_path: str = 'models/TinyLlama-1.1B-intermediate-step-715k-1.5T/tokenizer.model'
     llama_config_path: str = 'models/TinyLlama-1.1B-intermediate-step-715k-1.5T/config.json'
-    max_seq_len: int = 256
+    max_seq_len: int = 1024
     block_size: int = max_seq_len - 1
 
     # %% training config
@@ -25,8 +25,8 @@ class Config:
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
-    batch_size: int = 1
-    accum_batches: int = 1
+    batch_size: int = 8
+    accum_batches: int = 8
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100
