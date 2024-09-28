@@ -56,7 +56,10 @@ class TokenizedDataset(Dataset):
             self.index_map = [item for sublist in index_map_parts for item in sublist]
             if shuffle:
                 self.index_map = torch.tensor(self.index_map)[torch.randperm(len(self.index_map))]
-            torch.save(self.index_map, index_map_path)
+
+            local_rank = int(os.environ["LOCAL_RANK"])
+            if local_rank == 0:
+                torch.save(self.index_map, index_map_path)
 
         # split dataset
         entry_num = len(self.index_map)
