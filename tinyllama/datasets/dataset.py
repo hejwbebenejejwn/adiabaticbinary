@@ -1,8 +1,9 @@
 import os
-import torch
-from torch.utils.data import Dataset, DataLoader
 from glob import glob
 from multiprocessing import Pool, cpu_count
+
+import torch
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
 
@@ -18,8 +19,15 @@ def calculate_index_map(file_length_pair):
 
 
 class TokenizedDataset(Dataset):
-    def __init__(self, tokenized_dataset_path='tokenized/SlimPajama-627B', dataset_ratio=None,
-                 mode='training', shuffle=True, max_seq_len: int = 512, pad_id: int = -1):
+    def __init__(
+            self,
+            tokenized_dataset_path='tokenized/SlimPajama-627B',
+            dataset_ratio=None,
+            mode='training',
+            shuffle=True,
+            max_seq_len: int = 512,
+            pad_id: int = -1
+    ):
         super().__init__()
         self.pad_id = pad_id
         self.max_seq_len = max_seq_len

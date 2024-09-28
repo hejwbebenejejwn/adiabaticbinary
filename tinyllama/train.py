@@ -12,17 +12,19 @@ import fire
 import psutil
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 import wandb
 from datasets import TokenizedDataset
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from transformers import LlamaForCausalLM
 from transformers.models.llama import LlamaConfig
 
 from BinaryTinyLlama import BinaryLlamaForCausalLM
 from config import Config
-from utils import batch_early_stop_check
+from utils import batch_early_stop_check, get_model_kk
 
 torch.set_float32_matmul_precision('medium')
 
@@ -35,11 +37,13 @@ device = torch.device(f"cuda:{local_rank}")
 # %% record training states
 class TrainingState:
     # model state
-    llama_config: LlamaConfig
-    binary_model: BinaryLlamaForCausalLM
+    llama_config: LlamaConfig = None
+    binary_model: BinaryLlamaForCausalLM = None
+    full_model: LlamaForCausalLM = None
 
-    optimizer: torch.optim.Adam
-    lr_scheduler: torch.optim.lr_scheduler.StepLR
+    loss_fn_mse: F.mse_loss = None
+    optimizer: torch.optim.Adam = None
+    lr_scheduler: torch.optim.lr_scheduler.StepLR = None
 
     # train steps
     kk: float = 1.
@@ -56,15 +60,17 @@ class TrainingState:
 
 
 # %% trainer setup
-def set_up(config: Config) -> None:
+def set_up(config: Config, train_state: TrainingState) -> TrainingState:
     """Build model and Initialize optimizer & learning rate scheduler"""
     llama_config = LlamaConfig.from_pretrained(Config.full_ckpt_dir)
     llama_config.gradient_checkpointing = config.gradient_checkpointing
     llama_config.use_cache = config.use_cache
+    train_state.llama_config = llama_config
 
     ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name)
     # build binary model
-    print(f"Initializing Binary Model...")
+    if local_rank == 0:
+        print(f"Initializing Binary Model...")
     binary_model = BinaryLlamaForCausalLM(llama_config)
     for key, value in binary_model.state_dict().items():
         if key.endswith('.kk') or key.endswith('.aa') or key.endswith('.inv_freq'):
@@ -75,45 +81,93 @@ def set_up(config: Config) -> None:
             raise KeyError(f"{key} not found in pretrained model.")
     binary_model.set_kk_stage1(
         torch.tensor([config.init_kk, config.init_aa], dtype=config.dtype, device=binary_model.device))
+    train_state.binary_model = binary_model
+
+    # build tinyllama model
+    if config.kd_training:
+        if local_rank == 0:
+            print(f"Initializing Full Precision Model...")
+        full_model = LlamaForCausalLM(llama_config)
+        for key, value in full_model.state_dict().items():
+            if key.endswith('.inv_freq'):
+                continue
+            elif key in ckpt_state_dict.keys():
+                full_model.state_dict()[key].copy_(value)
+            else:
+                raise KeyError(f"{key} not found in pretrained model.")
+        train_state.full_model = full_model
+        # kd training loss function
+        loss_fn_mse = F.mse_loss
+        train_state.loss_fn_mse = loss_fn_mse
 
     optimizer = torch.optim.Adam(binary_model.parameters(), betas=config.betas, lr=config.base_lr)
+    train_state.optimizer = optimizer
     # change base_step_size & base_gamma as current lr changes
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.base_step_size, gamma=config.base_gamma)
+    train_state.lr_scheduler = lr_scheduler
 
-    TrainingState.binary_model = binary_model
-    TrainingState.llama_config = llama_config
-    TrainingState.optimizer = optimizer
-    TrainingState.lr_scheduler = lr_scheduler
+    return train_state
 
 
 # %% training
-def training_step(batch, config: Config) -> torch.Tensor:
+def training_step(
+        batch,
+        config: Config,
+        binary_model: BinaryLlamaForCausalLM,
+        full_model: LlamaForCausalLM,
+        loss_fn_mse: F.mse_loss,
+) -> torch.Tensor:
     """Training Step"""
-    binary_model = TrainingState.binary_model
 
     input_tokens = batch[:, 0:config.block_size].contiguous()
     target_tokens = batch[:, 1:config.block_size + 1].contiguous().long()
 
-    binary_model_outputs = binary_model.forward(input_tokens, labels=target_tokens)
-    loss = binary_model_outputs.loss
+    if config.kd_training:
+        kd_temperature = config.kd_temperature
+
+        binary_model_outputs = binary_model.forward(input_tokens, labels=target_tokens)
+        binary_logits = binary_model_outputs.logits
+        binary_logits = binary_logits.view(-1, binary_logits.size(-1))
+        binary_kd_probs = torch.softmax(binary_logits / kd_temperature, dim=-1)
+        binary_kd_probs = binary_kd_probs.view(-1, binary_kd_probs.size(-1))
+
+        full_logits = full_model.forward(input_tokens).logits
+        full_logits = full_logits.view(-1, binary_logits.size(-1))
+        full_kd_probs = torch.softmax(full_logits / kd_temperature, dim=-1)
+        full_kd_probs = full_kd_probs.view(-1, full_kd_probs.size(-1))
+
+        # logit KD loss
+        loss_ce = binary_model_outputs.loss
+        loss_mse = loss_fn_mse(input=binary_kd_probs, target=full_kd_probs)
+        loss = loss_ce + loss_mse * config.kd_alpha
+    else:
+        binary_model_outputs = binary_model.forward(input_tokens, labels=target_tokens)
+        loss = binary_model_outputs.loss
 
     return loss
 
 
-def training(train_dataloader: DataLoader, config: Config) -> None:
+def training(train_dataloader: DataLoader, config: Config, train_state: TrainingState) -> TrainingState:
     """Training Epoch"""
-    optimizer = TrainingState.optimizer
-    lr_scheduler = TrainingState.lr_scheduler
-    binary_model = TrainingState.binary_model
+    binary_model = train_state.binary_model
     binary_model.train()
+
+    full_model = train_state.full_model
+    if full_model is not None:
+        full_model.eval()
+
+    loss_fn_mse = train_state.loss_fn_mse
+
+    optimizer = train_state.optimizer
+    lr_scheduler = train_state.lr_scheduler
     scaler = GradScaler()
 
     # training loops
     if local_rank == 0:
-        kk = TrainingState.kk
-        aa = TrainingState.aa
+        kk = train_state.kk
+        aa = train_state.aa
         print(f"[GPU{local_rank}]",
-              f"Epoch {TrainingState.epoch},",
+              f"Epoch {train_state.epoch},",
               f"kk = {kk:.2f},",
               f"aa = {aa:.2f}",
               f"Training",
@@ -130,7 +184,7 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
         data = data.to(device, non_blocking=True)
 
         with autocast(dtype=torch.float16):
-            train_loss = training_step(data, config)
+            train_loss = training_step(data, config, binary_model, full_model, loss_fn_mse)
             accumulated_loss += train_loss
 
         scaler.scale(train_loss).backward()
@@ -141,8 +195,8 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
             optimizer.zero_grad(set_to_none=True)
             accumulated_loss = 0.0
 
-            TrainingState.accum_step += 1
-            n_accum = TrainingState.accum_step
+            train_state.accum_step += 1
+            n_accum = train_state.accum_step
 
             if local_rank == 0:
                 elapsed = time.time() - start
@@ -158,118 +212,137 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
                 batch_wait = 0  # reset patience counter if new min_loss found
             else:
                 batch_wait += 1
-            print({f"min_loss: {min_loss:6.2f}, accumulate step patience: {batch_wait}/{config.accum_step_patience}"})
-            # Check if we need to stop early
-            dist.barrier()
-            local_stop_flag = batch_wait >= config.accum_step_patience
-            global_stop_flag = batch_early_stop_check(local_stop_flag)
-            if global_stop_flag:
+
+            if local_rank == 0:
+                print(f"min_loss: {min_loss:6.2f}, accumulate step patience: {batch_wait}/{config.accum_step_patience}")
+        # Check if we need to stop early
+        dist.barrier()
+        local_stop_flag = batch_wait >= config.accum_step_patience
+        global_stop_flag = batch_early_stop_check(local_stop_flag)
+        if global_stop_flag:
+            if local_rank == 0:
                 print("Early stopping triggered.")
-                break
+            break
 
     GPUtil.showUtilization()
 
     # step lr scheduler every epoch
     lr_scheduler.step()
-    TrainingState.epoch += 1
 
     mean_train_loss = torch.mean(torch.tensor(train_epoch_loss)).item()
     wandb.log({'train_loss': mean_train_loss})
 
+    return train_state
+
 
 # %% validation
-def validation_step(batch, config: Config = Config()) -> torch.Tensor:
+def validation_step(batch, config: Config, binary_model: BinaryLlamaForCausalLM) -> torch.Tensor:
     """Validation Step"""
     input_tokens = batch[:, 0:config.block_size].contiguous()
-    binary_model = TrainingState.binary_model
-    valid_loss = binary_model.forward(input_tokens).loss
+    target_tokens = batch[:, 1:config.block_size + 1].contiguous().long()
+
+    valid_loss = binary_model.forward(input_tokens, labels=target_tokens).loss
+
     return valid_loss
 
 
-def validation(valid_dataloader: DataLoader, config: Config = Config()) -> None:
+def validation(valid_dataloader: DataLoader, config: Config, train_state: TrainingState) -> TrainingState:
     """Validation Epoch"""
-    binary_model = TrainingState.binary_model
+    binary_model = train_state.binary_model
     binary_model.eval()
 
-    kk = TrainingState.kk
-    aa = TrainingState.aa
+    kk = train_state.kk
+    aa = train_state.aa
     if local_rank == 0:
-        print(f"[GPU{local_rank}] Epoch {TrainingState.epoch}, kk = {kk:.2f}, aa = {aa:.2f} Validation "
-              + "=" * 10, flush=True)
+        print(
+            f"[GPU{local_rank}] Epoch {train_state.epoch},",
+            "kk = {kk:.2f},",
+            "aa = {aa:.2f} Validation",
+            "=" * 10,
+            flush=True
+        )
+    train_state.epoch += 1
     with torch.no_grad(), autocast(dtype=torch.float16):
         valid_epoch_loss = []
-        for data in valid_dataloader:
+        for i, data in enumerate(valid_dataloader):
             data = data.to(device, non_blocking=True)
-            valid_loss = validation_step(data, config)
+            valid_loss = validation_step(data, config, binary_model)
             valid_epoch_loss.append(valid_loss)
+            if local_rank == 0:
+                print(f"Epoch Step: {i + 1:6d} | Loss: {valid_loss:6.2f}")
 
     mean_valid_loss = torch.mean(torch.tensor(valid_epoch_loss)).item()
-    TrainingState.temp_valid_loss_list.append(mean_valid_loss)
+    train_state.temp_valid_loss_list.append(mean_valid_loss)
     wandb.log({'valid_loss': mean_valid_loss})
 
     # calculate unbinary ratio
     unbinary_ratio = []
-    for name, param in binary_model.named_parameters():
-        if name.endswith('.weight') and name != 'tok_embeddings.weight':
-            weight = param.flatten()
-            k = binary_model.state_dict()[name[:-7] + '.kk']
-            a = binary_model.state_dict()[name[:-7] + '.aa']
+    for name, module in binary_model.named_modules():
+        try:
+            weight = module.weight.flatten()
+            k = module.kk
+            a = module.aa
             weight_binary = a * torch.tanh(k * (weight - weight.mean())).abs()
             unbinary_ratio.append(weight_binary[weight_binary < 0.99].shape[0] / weight.shape[0])
+        except Exception:
+            pass
     max_unbinary_ratio = torch.max(torch.tensor(unbinary_ratio)).item()
-    TrainingState.temp_unbinary_ratio.append(max_unbinary_ratio)
-    TrainingState.unbinary_ratio.append(max_unbinary_ratio)
+    train_state.temp_unbinary_ratio.append(max_unbinary_ratio)
+    train_state.unbinary_ratio.append(max_unbinary_ratio)
     wandb.log({'unbinary_ratio': max_unbinary_ratio})
 
     if local_rank == 0:
         print(f"Remaining Unbinary Weight: {max_unbinary_ratio * 100:.2f} % ")
 
+    return train_state
+
 
 # %% early stop methods
-def kk_callback(config: Config = Config()) -> None:
+def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
     """kk Callback Function:
     Call back at the end of each epoch.
     Push kk and rewind model state."""
-    current_epoch = TrainingState.epoch
+    current_epoch = train_state.epoch
 
     # adjust gamma
-    mean_unbinary_ratio = torch.mean(torch.tensor(TrainingState.temp_unbinary_ratio)).item()
-    last_unbinary_ratio = torch.mean(torch.tensor(TrainingState.temp_unbinary_ratio[-config.patience:])).item()
+    mean_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio)).item()
+    last_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio[-config.patience:])).item()
     if (mean_unbinary_ratio - last_unbinary_ratio) > 0.01:
         config.base_gamma -= 0.1
     elif (mean_unbinary_ratio - last_unbinary_ratio) < 0.01:
         config.base_gamma += 0.1
-    TrainingState.lr_scheduler.gamma = config.base_gamma
+    train_state.lr_scheduler.gamma = config.base_gamma
 
     # save checkpoint
     file_path = f'{config.save_dir}/{config.file_prefix}-{current_epoch}.pt'
-    save_dict = {'train_state': TrainingState}
+    save_dict = {'train_state': train_state}
     torch.save(save_dict, file_path)
 
-    mean_valid_loss = torch.mean(torch.tensor(TrainingState.temp_valid_loss_list)).item()
-    last_valid_loss = torch.mean(torch.tensor(TrainingState.temp_valid_loss_list[-config.patience:])).item()
+    mean_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list)).item()
+    last_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list[-config.patience:])).item()
 
     # update the best validation loss and train epoch
-    current_valid_loss = TrainingState.temp_valid_loss_list[-1]
-    if current_valid_loss < TrainingState.best_valid_loss:
-        TrainingState.best_valid_loss = current_valid_loss
-        TrainingState.best_epoch = current_epoch
+    current_valid_loss = train_state.temp_valid_loss_list[-1]
+    if current_valid_loss < train_state.best_valid_loss:
+        train_state.best_valid_loss = current_valid_loss
+        train_state.best_epoch = current_epoch
+
+    print(f"Mean Validation Loss: {mean_valid_loss:6.2f} | Current Validation Loss: {last_valid_loss:6.2f}")
 
     if mean_valid_loss < last_valid_loss:
+        print("Pushing kk ...")
         # remove extra files
         file_to_del = [f'{config.save_dir}/{config.file_prefix}-{i}.pt'
-                       for i in range(TrainingState.best_epoch + 1, current_epoch + 1)]
+                       for i in range(train_state.best_epoch + 1, current_epoch + 1)]
         for file in file_to_del:
             os.remove(file)
         # load best state
-        best_file = f'{config.save_dir}/{config.file_prefix}-{TrainingState.best_epoch}.pt'
-        checkpoint = torch.load(best_file)['train_state']
-        # %% new state
-        for attr in TrainingState.__dict__.keys():
-            setattr(TrainingState, attr, checkpoint[attr])
-        kk = TrainingState.binary_model.state_dict()['model.layers.0.self_attn.q_proj.kk']
+        best_file = f'{config.save_dir}/{config.file_prefix}-{train_state.best_epoch}.pt'
+        train_state = torch.load(best_file)['train_state']
+        print(f"Return back to Epoch{train_state.best_epoch}.")
 
-        # push kk and aa
+        # %% push kk and aa
+        kk, _ = get_model_kk(train_state.binary_model)
         if kk < 1:
             kk += config.kk_lr1
             aa = 1 / kk
@@ -279,24 +352,25 @@ def kk_callback(config: Config = Config()) -> None:
 
         # stage 1
         if kk < config.kk_threshold:
-            TrainingState.binary_model.set_kk_stage1(torch.tensor([kk, aa], dtype=kk.dtype, device=device))
+            train_state.binary_model.set_kk_stage1(torch.tensor([kk, aa], dtype=kk.dtype, device=device))
         # stage 2
         else:
-            TrainingState.binary_model.set_kk_stage2(torch.tensor(config.ratio, dtype=kk.dtype, device=device))
+            train_state.binary_model.set_kk_stage2(torch.tensor(config.ratio, dtype=kk.dtype, device=device))
 
         # record changes
-        kk = TrainingState.binary_model.state_dict()['model.layers.0.self_attn.q_proj.kk']
-        aa = TrainingState.binary_model.state_dict()['model.layers.0.self_attn.q_proj.aa']
-        TrainingState.kk = kk
-        TrainingState.aa = aa
+        kk, aa = get_model_kk(train_state.binary_model)
+        train_state.kk = kk
+        train_state.aa = aa
         wandb.log({'kk': kk})
         wandb.log({'aa': aa})
 
         # initialize temporary parameters
-        TrainingState.best_epoch = 0
-        TrainingState.best_valid_loss = torch.tensor(float('inf')).item()
-        TrainingState.temp_valid_loss_list = []
-        TrainingState.temp_unbinary_ratio = []
+        train_state.best_epoch = 0
+        train_state.best_valid_loss = torch.tensor(float('inf')).item()
+        train_state.temp_valid_loss_list = []
+        train_state.temp_unbinary_ratio = []
+
+    return train_state
 
 
 # %% main function
@@ -330,21 +404,20 @@ def main(config: Config) -> None:
             i += 1
         GPUtil.showUtilization()
 
-    # prepare model
-    if local_rank == 0:
-        print("=" * 20, "Preparing Model", "=" * 20)
-    set_up(config)
-    llama_config = TrainingState.llama_config
-
     # check if resume
     ckpt_files = glob(f'{config.save_dir}/*.pt', recursive=True)
     latest_checkpoint = max(ckpt_files, key=lambda x: int(re.search(r'(\d+)', x).group(1)), default=None)
     if latest_checkpoint:
         if local_rank == 0:
             print("=" * 20, f"Resume from {latest_checkpoint}", "=" * 20)
-        checkpoint = torch.load(latest_checkpoint)['train_state']
-        for attr in TrainingState.__dict__.keys():
-            setattr(TrainingState, attr, checkpoint[attr])
+        train_state = torch.load(latest_checkpoint)['train_state']
+        llama_config = train_state.llama_config
+    else:
+        # prepare model
+        if local_rank == 0:
+            print("=" * 20, "Preparing Model", "=" * 20)
+        train_state = set_up(config, TrainingState())
+        llama_config = train_state.llama_config
 
     # prepare datasets
     train_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_dir,
@@ -370,25 +443,29 @@ def main(config: Config) -> None:
 
     # start training
     current_unbinary_ratio = 1.
-    binary_model = TrainingState.binary_model
+    binary_model = train_state.binary_model
     binary_model.to(device)
-
     # make ddp model
-    TrainingState.binary_model = DDP(binary_model, device_ids=[local_rank], output_device=local_rank)
+    train_state.binary_model = DDP(binary_model, device_ids=[local_rank], output_device=local_rank)
+    if config.kd_training:
+        full_model = train_state.full_model
+        full_model.to(device)
+        # make ddp model
+        train_state.full_model = DDP(full_model, device_ids=[local_rank], output_device=local_rank)
 
     # run training
     while current_unbinary_ratio > config.unbinary_ratio_threshold:
         if local_rank == 0:
-            kk = TrainingState.kk
+            kk = train_state.kk
             if kk < config.kk_threshold:
                 print("=" * 20, "Training Stage 1", "=" * 20)
             else:
                 print("=" * 20, "Training Stage 2", "=" * 20)
 
-        training(train_dataloader, config)
-        validation(valid_dataloader, config)
-        kk_callback(config)
-        current_unbinary_ratio = TrainingState.unbinary_ratio[-1]
+        train_state = training(train_dataloader, config, train_state)
+        train_state = validation(valid_dataloader, config, train_state)
+        train_state = kk_callback(config, train_state)
+        current_unbinary_ratio = train_state.unbinary_ratio[-1]
 
 
 if __name__ == '__main__':

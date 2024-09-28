@@ -23,3 +23,17 @@ def batch_early_stop_check(local_early_stopping):
     dist.all_reduce(stop_flag, op=dist.ReduceOp.SUM)
 
     return stop_flag.item() > 0
+
+
+def get_model_kk(model, ):
+    kk_list = []
+    aa_list = []
+    for _, module in model.named_modules():
+        try:
+            kk_list.append(module.kk)
+            aa_list.append(module.aa)
+        except Exception:
+            pass
+    model_kk = torch.stack(kk_list, dim=0).mean(dim=0)
+    model_aa = torch.stack(aa_list, dim=0).mean(dim=0)
+    return model_kk, model_aa

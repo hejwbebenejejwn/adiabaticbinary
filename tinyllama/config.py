@@ -8,7 +8,7 @@ import torch
 class Config:
     # %% dataset config
     tokenized_dataset_dir: str = 'datasets/tokenized/SlimPajama-627B'
-    dataset_ratio: list = None
+    dataset_ratio: tuple = (0.9, 0.09, 0.01)
     shuffle: bool = True
     dtype: torch.dtype = torch.float16
 
@@ -17,7 +17,7 @@ class Config:
     full_ckpt_name: str = 'pytorch_model.bin'
     tokenizer_path: str = 'models/TinyLlama-1.1B-intermediate-step-715k-1.5T/tokenizer.model'
     llama_config_path: str = 'models/TinyLlama-1.1B-intermediate-step-715k-1.5T/config.json'
-    max_seq_len: int = 1024
+    max_seq_len: int = 256
     block_size: int = max_seq_len - 1
 
     # %% training config
@@ -25,17 +25,18 @@ class Config:
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
-    batch_size: int = 8
-    accum_batches: int = 8
+    batch_size: int = 1
+    accum_batches: int = 1
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100
     base_gamma: float = 0.9
-    save_dir: str = 'models/BinaryLlama'
+    save_dir: str = 'models/checkpoints'
     file_prefix: str = 'binary-llama'
     result_dir: str = 'results/'
 
     # %% binary KD training config
+    kd_training: bool = False  # if you use knowledge distillation training
     kd_temperature: float = 10.
     kd_alpha: float = 0.1
     init_kk: float = 0.5
@@ -45,4 +46,4 @@ class Config:
     kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2
     # TODO: determined according to initial model weights
     ratio: float = 0.1
-    patience = 15
+    patience = 15  # last epoches to calculate mean temporary validation loss
