@@ -1,2 +1,2 @@
-from .log import log_loss_file
 from .tokenizer import Tokenizer
+from .utils import log_loss_file, batch_early_stop_check

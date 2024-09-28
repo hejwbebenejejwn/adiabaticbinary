@@ -22,6 +22,7 @@ from transformers.models.llama import LlamaConfig
 
 from BinaryTinyLlama import BinaryLlamaForCausalLM
 from config import Config
+from utils import batch_early_stop_check
 
 torch.set_float32_matmul_precision('medium')
 
@@ -159,7 +160,10 @@ def training(train_dataloader: DataLoader, config: Config) -> None:
                 batch_wait += 1
             print({f"min_loss: {min_loss:6.2f}, accumulate step patience: {batch_wait}/{config.accum_step_patience}"})
             # Check if we need to stop early
-            if batch_wait >= config.accum_step_patience:
+            dist.barrier()
+            local_stop_flag = batch_wait >= config.accum_step_patience
+            global_stop_flag = batch_early_stop_check(local_stop_flag)
+            if global_stop_flag:
                 print("Early stopping triggered.")
                 break
 

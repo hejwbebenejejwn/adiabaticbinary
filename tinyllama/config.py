@@ -21,7 +21,7 @@ class Config:
     block_size: int = max_seq_len - 1
 
     # %% training config
-    accum_step_patience: int = 50  # accumulation steps
+    accum_step_patience: int = 50  # accumulation steps TODO: for debugging only, must up to 1000 for full training
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
@@ -42,6 +42,7 @@ class Config:
     init_aa: float = 1 / init_kk
     kk_lr1: float = 0.5
     kk_lr2: float = 1.25
-    kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2 (for present)
+    kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2
+    # TODO: determined according to initial model weights
     ratio: float = 0.1
     patience = 15
