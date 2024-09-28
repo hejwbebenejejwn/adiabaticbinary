@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 import torch
+import torch.nn.functional as F
 
 
 @dataclass
@@ -21,7 +22,7 @@ class Config:
     block_size: int = max_seq_len - 1
 
     # %% training config
-    accum_step_patience: int = 50  # accumulation steps TODO: for debugging only, must up to 1000 for full training
+    accum_step_patience: int = 100  # accumulation steps TODO: for debugging only, must up to 1000 for full training
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
@@ -36,11 +37,12 @@ class Config:
     result_dir: str = 'results/'
 
     # %% binary KD training config
+    loss_fn_mse: F.mse_loss = F.mse_loss
     kd_training: bool = False  # if you use knowledge distillation training
     kd_temperature: float = 10.
     kd_alpha: float = 0.1
-    init_kk: float = 0.5
-    init_aa: float = 1 / init_kk
+    initial_kk: float = 0.5
+    initial_aa: float = 1 / initial_kk
     kk_lr1: float = 0.5
     kk_lr2: float = 1.25
     kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2

@@ -5,7 +5,6 @@ import time
 from glob import glob
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import List
 
 import GPUtil
 import fire
@@ -24,7 +23,7 @@ from transformers.models.llama import LlamaConfig
 
 from BinaryTinyLlama import BinaryLlamaForCausalLM
 from config import Config
-from utils import batch_early_stop_check, get_model_kk
+from utils import batch_early_stop_check, get_model_kk, TrainingState
 
 torch.set_float32_matmul_precision('medium')
 
@@ -32,31 +31,6 @@ rank = int(os.environ["RANK"])
 local_rank = int(os.environ["LOCAL_RANK"])
 torch.cuda.set_device(rank % torch.cuda.device_count())
 device = torch.device(f"cuda:{local_rank}")
-
-
-# %% record training states
-class TrainingState:
-    # model state
-    llama_config: LlamaConfig = None
-    binary_model: BinaryLlamaForCausalLM = None
-    full_model: LlamaForCausalLM = None
-
-    loss_fn_mse: F.mse_loss = None
-    optimizer: torch.optim.Adam = None
-    lr_scheduler: torch.optim.lr_scheduler.StepLR = None
-
-    # train steps
-    kk: float = 1.
-    aa: float = 1.
-    epoch: int = 0
-    accum_step: int = 0  # Number of gradient accumulation steps
-    unbinary_ratio: List[float] = []
-
-    # temporary parameters
-    best_epoch: int = 0
-    best_valid_loss: float = torch.tensor(float('inf')).item()
-    temp_valid_loss_list: List[float] = []
-    temp_unbinary_ratio: List[float] = []
 
 
 # %% trainer setup
@@ -80,8 +54,10 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
         else:
             raise KeyError(f"{key} not found in pretrained model.")
     binary_model.set_kk_stage1(
-        torch.tensor([config.init_kk, config.init_aa], dtype=config.dtype, device=binary_model.device))
+        torch.tensor([config.initial_kk, config.initial_aa], dtype=config.dtype, device=binary_model.device))
     train_state.binary_model = binary_model
+    train_state.kk = config.initial_kk
+    train_state.aa = config.initial_aa
 
     # build tinyllama model
     if config.kd_training:
@@ -96,9 +72,6 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
             else:
                 raise KeyError(f"{key} not found in pretrained model.")
         train_state.full_model = full_model
-        # kd training loss function
-        loss_fn_mse = F.mse_loss
-        train_state.loss_fn_mse = loss_fn_mse
 
     optimizer = torch.optim.Adam(binary_model.parameters(), betas=config.betas, lr=config.base_lr)
     train_state.optimizer = optimizer
@@ -156,7 +129,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
     if full_model is not None:
         full_model.eval()
 
-    loss_fn_mse = train_state.loss_fn_mse
+    loss_fn_mse = config.loss_fn_mse
 
     optimizer = train_state.optimizer
     lr_scheduler = train_state.lr_scheduler
@@ -164,16 +137,15 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
 
     # training loops
     if local_rank == 0:
-        kk = train_state.kk
-        aa = train_state.aa
-        print(f"[GPU{local_rank}]",
-              f"Epoch {train_state.epoch},",
-              f"kk = {kk:.2f},",
-              f"aa = {aa:.2f}",
-              f"Training",
-              "=" * 10,
-              flush=True
-              )
+        print(
+            f"[GPU{local_rank}]",
+            f"Epoch {train_state.epoch},",
+            f"kk = {train_state.kk:.2f},",
+            f"aa = {train_state.aa:.2f}",
+            f"Training",
+            "=" * 10,
+            flush=True
+        )
 
     train_epoch_loss = []
     accumulated_loss = 0.0  # initialize for batch accumulation
@@ -200,10 +172,11 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
 
             if local_rank == 0:
                 elapsed = time.time() - start
-                print(f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f}",
-                      f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f}",
-                      f"| Learning Rate: {lr_scheduler.get_last_lr()[0]:6.1e}"
-                      )
+                print(
+                    f"Epoch Step: {i + 1:6d} | Accumulation Step: {n_accum:3d} | Loss: {train_loss:6.2f}",
+                    f"| Tokens/Sec: {config.max_seq_len / elapsed:7.1f}",
+                    f"| Learning Rate: {lr_scheduler.get_last_lr()[0]:6.1e}"
+                )
 
             train_epoch_loss.append(train_loss)
             # Update min_loss if current train_loss is lower
@@ -214,15 +187,16 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
                 batch_wait += 1
 
             if local_rank == 0:
-                print(f"min_loss: {min_loss:6.2f}, accumulate step patience: {batch_wait}/{config.accum_step_patience}")
-        # Check if we need to stop early
-        dist.barrier()
-        local_stop_flag = batch_wait >= config.accum_step_patience
-        global_stop_flag = batch_early_stop_check(local_stop_flag)
-        if global_stop_flag:
-            if local_rank == 0:
-                print("Early stopping triggered.")
-            break
+                print(f"accumulate step patience: {batch_wait}/{config.accum_step_patience}")
+
+            # Check if we need to stop early
+            dist.barrier()
+            local_stop_flag = batch_wait >= config.accum_step_patience
+            global_stop_flag = batch_early_stop_check(local_stop_flag)
+            if global_stop_flag:
+                if local_rank == 0:
+                    print("Early stopping triggered.")
+                break
 
     GPUtil.showUtilization()
 
@@ -251,13 +225,11 @@ def validation(valid_dataloader: DataLoader, config: Config, train_state: Traini
     binary_model = train_state.binary_model
     binary_model.eval()
 
-    kk = train_state.kk
-    aa = train_state.aa
     if local_rank == 0:
         print(
             f"[GPU{local_rank}] Epoch {train_state.epoch},",
-            "kk = {kk:.2f},",
-            "aa = {aa:.2f} Validation",
+            f"kk = {train_state.kk:.2f},",
+            f"aa = {train_state.aa:.2f} Validation",
             "=" * 10,
             flush=True
         )
@@ -315,8 +287,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
 
     # save checkpoint
     file_path = f'{config.save_dir}/{config.file_prefix}-{current_epoch}.pt'
-    save_dict = {'train_state': train_state}
-    torch.save(save_dict, file_path)
+    train_state.save(file_path)
 
     mean_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list)).item()
     last_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list[-config.patience:])).item()
@@ -327,7 +298,8 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
         train_state.best_valid_loss = current_valid_loss
         train_state.best_epoch = current_epoch
 
-    print(f"Mean Validation Loss: {mean_valid_loss:6.2f} | Current Validation Loss: {last_valid_loss:6.2f}")
+    print(f"Mean Validation Loss: {mean_valid_loss:7.5f}")
+    print(f"Current Validation Loss: {last_valid_loss:7.5f}")
 
     if mean_valid_loss < last_valid_loss:
         print("Pushing kk ...")
@@ -338,8 +310,8 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
             os.remove(file)
         # load best state
         best_file = f'{config.save_dir}/{config.file_prefix}-{train_state.best_epoch}.pt'
-        train_state = torch.load(best_file)['train_state']
         print(f"Return back to Epoch{train_state.best_epoch}.")
+        train_state = TrainingState.from_dict(torch.load(best_file)['train_state'])
 
         # %% push kk and aa
         kk, _ = get_model_kk(train_state.binary_model)
@@ -376,9 +348,8 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
 # %% main function
 def main(config: Config) -> None:
     # initialize
-    wandb.init(project='binary-llama', mode="offline")
-    wandb.config.update(config)
     os.makedirs(config.save_dir, exist_ok=True)
+    dist.init_process_group(backend='nccl')
 
     # show platform information
     if local_rank == 0:
@@ -410,14 +381,20 @@ def main(config: Config) -> None:
     if latest_checkpoint:
         if local_rank == 0:
             print("=" * 20, f"Resume from {latest_checkpoint}", "=" * 20)
-        train_state = torch.load(latest_checkpoint)['train_state']
-        llama_config = train_state.llama_config
+        train_state = TrainingState.from_dict(torch.load(latest_checkpoint)['train_state'])
+        # initialize
+        wandb.init(project='binary-llama', mode="offline", id=train_state.wandb_run_id)
     else:
+        # initialize
+        train_state = TrainingState()
+        run = wandb.init(project='binary-llama', mode="offline")
+        train_state.wandb_run_id = run.id
+        wandb.config.update(config)
         # prepare model
         if local_rank == 0:
             print("=" * 20, "Preparing Model", "=" * 20)
-        train_state = set_up(config, TrainingState())
-        llama_config = train_state.llama_config
+        train_state = set_up(config, train_state)
+    llama_config = train_state.llama_config
 
     # prepare datasets
     train_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_dir,
@@ -430,7 +407,6 @@ def main(config: Config) -> None:
                                     dataset_ratio=config.dataset_ratio, mode='test', shuffle=config.shuffle,
                                     max_seq_len=config.max_seq_len, pad_id=llama_config.pad_token_id)
     # dataloaders
-    dist.init_process_group(backend='nccl')
     train_sampler = DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size,
                                   sampler=train_sampler, num_workers=cpu_count(), pin_memory=True)
@@ -456,8 +432,7 @@ def main(config: Config) -> None:
     # run training
     while current_unbinary_ratio > config.unbinary_ratio_threshold:
         if local_rank == 0:
-            kk = train_state.kk
-            if kk < config.kk_threshold:
+            if train_state.kk < config.kk_threshold:
                 print("=" * 20, "Training Stage 1", "=" * 20)
             else:
                 print("=" * 20, "Training Stage 2", "=" * 20)
