@@ -135,6 +135,10 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
     lr_scheduler = train_state.lr_scheduler
     scaler = GradScaler()
 
+    # Ensure the data is shuffled and redistributed for each epoch
+    train_sampler = train_dataloader.sampler
+    train_sampler.set_epoch(train_state.epoch)
+
     # training loops
     if local_rank == 0:
         print(
@@ -381,6 +385,7 @@ def main(config: Config) -> None:
     if latest_checkpoint:
         if local_rank == 0:
             print("=" * 20, f"Resume from {latest_checkpoint}", "=" * 20)
+            print("Loading Checkpoint...")
         train_state = TrainingState.from_dict(torch.load(latest_checkpoint)['train_state'])
         # initialize
         wandb.init(project='binary-llama', mode="offline", id=train_state.wandb_run_id)

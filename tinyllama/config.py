@@ -9,8 +9,8 @@ import torch.nn.functional as F
 class Config:
     # %% dataset config
     tokenized_dataset_dir: str = 'datasets/tokenized/SlimPajama-627B'
-    validation_dataset_items: int = 8
-    test_dataset_items: int = 8
+    validation_dataset_items: int = 8000
+    test_dataset_items: int = 80000
     shuffle: bool = True
     dtype: torch.dtype = torch.float16
 
