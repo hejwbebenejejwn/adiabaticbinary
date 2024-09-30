@@ -190,8 +190,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
             else:
                 batch_wait += 1
 
-            if local_rank == 0:
-                print(f"Accumulate Step Patience: {batch_wait}/{config.accum_step_patience}")
+            print(f"Rank {local_rank} Accumulate Step Patience: {batch_wait}/{config.accum_step_patience}")
 
             # Check if we need to stop early
             dist.barrier()

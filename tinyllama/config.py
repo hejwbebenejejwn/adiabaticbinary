@@ -9,8 +9,8 @@ import torch.nn.functional as F
 class Config:
     # %% dataset config
     tokenized_dataset_dir: str = 'datasets/tokenized/SlimPajama-627B'
-    validation_dataset_items: int = 8000
-    test_dataset_items: int = 80000
+    validation_dataset_items: int = 2000
+    test_dataset_items: int = 2000
     shuffle: bool = True
     dtype: torch.dtype = torch.float16
 
@@ -23,7 +23,7 @@ class Config:
     block_size: int = max_seq_len - 1
 
     # %% training config
-    accum_step_patience: int = 100  # accumulation steps TODO: for debugging only, must up to 1000 for full training
+    accum_step_patience: int = 50  # accumulation steps TODO: for debugging only, must up to 1000 for full training
     gradient_checkpointing: bool = True
     use_cache: bool = False
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
@@ -48,5 +48,5 @@ class Config:
     kk_lr2: float = 1.25
     kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2
     # TODO: determined according to initial model weights
-    ratio: float = 0.1
-    patience = 15  # last epoches to calculate mean temporary validation loss
+    ratio: float = 0.1  # ratio of remaining kk being pushed to binary at each push in stage 2
+    patience = 5  # last epoches to calculate mean temporary validation loss
