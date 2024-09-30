@@ -23,7 +23,8 @@ class TokenizedDataset(Dataset):
     def __init__(
             self,
             tokenized_dataset_path='tokenized/SlimPajama-627B',
-            dataset_ratio=None,
+            validation_dataset_items: int = 8000,
+            test_dataset_items: int = 80000,
             mode='training',
             shuffle=True,
             max_seq_len: int = 512,
@@ -33,12 +34,6 @@ class TokenizedDataset(Dataset):
         self.pad_id = pad_id
         self.max_seq_len = max_seq_len
         self.files = glob(f'{tokenized_dataset_path}/*.pt', recursive=True)
-
-        # check dataset ratio
-        if dataset_ratio is None:
-            dataset_ratio = [0.9, 0.05, 0.05]
-        if sum(dataset_ratio) > 1:
-            dataset_ratio = torch.tensor(dataset_ratio) / sum(dataset_ratio)
 
         # make/load index map
         os.makedirs(f'{tokenized_dataset_path}/index_map', exist_ok=True)
@@ -66,15 +61,27 @@ class TokenizedDataset(Dataset):
         dist.barrier()
 
         # split dataset
-        entry_num = len(self.index_map)
-        train_end = int(entry_num * dataset_ratio[0])
-        valid_end = train_end + int(entry_num * dataset_ratio[1])
+        index_map_len = len(self.index_map)
+
+        # check if there are enough items for split
+        if validation_dataset_items + test_dataset_items > index_map_len:
+            raise ValueError("Not enough items in the dataset for the specified validation and test sizes")
+
+        if shuffle:
+            entry_ids = torch.randperm(index_map_len)
+        else:
+            entry_ids = torch.arange(index_map_len)
+
+        valid_ids = entry_ids[:validation_dataset_items]
+        test_ids = entry_ids[validation_dataset_items:validation_dataset_items + test_dataset_items]
+        train_ids = entry_ids[validation_dataset_items + test_dataset_items:]
+
         if mode == 'training':
-            self.index_map = self.index_map[:train_end]
+            self.index_map = self.index_map[train_ids]
         elif mode == 'validation':
-            self.index_map = self.index_map[train_end:valid_end]
+            self.index_map = self.index_map[valid_ids]
         elif mode == 'test':
-            self.index_map = self.index_map[valid_end:]
+            self.index_map = self.index_map[test_ids]
 
     def __len__(self):
         return len(self.index_map)

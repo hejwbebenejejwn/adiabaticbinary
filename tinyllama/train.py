@@ -187,7 +187,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
                 batch_wait += 1
 
             if local_rank == 0:
-                print(f"accumulate step patience: {batch_wait}/{config.accum_step_patience}")
+                print(f"Accumulate Step Patience: {batch_wait}/{config.accum_step_patience}")
 
             # Check if we need to stop early
             dist.barrier()
@@ -299,7 +299,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
         train_state.best_epoch = current_epoch
 
     print(f"Mean Validation Loss: {mean_valid_loss:7.5f}")
-    print(f"Current Validation Loss: {last_valid_loss:7.5f}")
+    print(f"Current Mean Validation Loss: {last_valid_loss:7.5f}")
 
     if mean_valid_loss < last_valid_loss:
         print("Pushing kk ...")
@@ -397,25 +397,58 @@ def main(config: Config) -> None:
     llama_config = train_state.llama_config
 
     # prepare datasets
-    train_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_dir,
-                                     dataset_ratio=config.dataset_ratio, mode='training', shuffle=config.shuffle,
-                                     max_seq_len=config.max_seq_len, pad_id=llama_config.pad_token_id)
-    valid_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_dir,
-                                     dataset_ratio=config.dataset_ratio, mode='validation', shuffle=config.shuffle,
-                                     max_seq_len=config.max_seq_len, pad_id=llama_config.pad_token_id)
-    test_dataset = TokenizedDataset(tokenized_dataset_path=config.tokenized_dataset_dir,
-                                    dataset_ratio=config.dataset_ratio, mode='test', shuffle=config.shuffle,
-                                    max_seq_len=config.max_seq_len, pad_id=llama_config.pad_token_id)
+    train_dataset = TokenizedDataset(
+        tokenized_dataset_path=config.tokenized_dataset_dir,
+        validation_dataset_items=config.validation_dataset_items,
+        test_dataset_items=config.test_dataset_items,
+        mode='training',
+        shuffle=config.shuffle,
+        max_seq_len=config.max_seq_len,
+        pad_id=llama_config.pad_token_id
+    )
+    valid_dataset = TokenizedDataset(
+        tokenized_dataset_path=config.tokenized_dataset_dir,
+        validation_dataset_items=config.validation_dataset_items,
+        test_dataset_items=config.test_dataset_items,
+        mode='validation',
+        shuffle=config.shuffle,
+        max_seq_len=config.max_seq_len,
+        pad_id=llama_config.pad_token_id
+    )
+    test_dataset = TokenizedDataset(
+        tokenized_dataset_path=config.tokenized_dataset_dir,
+        validation_dataset_items=config.validation_dataset_items,
+        test_dataset_items=config.test_dataset_items,
+        mode='test',
+        shuffle=config.shuffle,
+        max_seq_len=config.max_seq_len,
+        pad_id=llama_config.pad_token_id
+    )
     # dataloaders
     train_sampler = DistributedSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size,
-                                  sampler=train_sampler, num_workers=cpu_count(), pin_memory=True)
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=config.batch_size,
+        sampler=train_sampler,
+        num_workers=cpu_count(),
+        pin_memory=True
+    )
     valid_sampler = DistributedSampler(valid_dataset)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=config.batch_size,
-                                  sampler=valid_sampler, num_workers=cpu_count(), pin_memory=True)
+    valid_dataloader = DataLoader(
+        valid_dataset,
+        batch_size=config.batch_size,
+        sampler=valid_sampler,
+        num_workers=cpu_count(),
+        pin_memory=True
+    )
     test_sampler = DistributedSampler(test_dataset)
-    test_dataloader = DataLoader(test_dataset, batch_size=config.batch_size,
-                                 sampler=test_sampler, num_workers=cpu_count(), pin_memory=True)
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=config.batch_size,
+        sampler=test_sampler,
+        num_workers=cpu_count(),
+        pin_memory=True
+    )
 
     # start training
     current_unbinary_ratio = 1.
