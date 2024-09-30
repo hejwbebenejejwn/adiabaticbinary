@@ -3,6 +3,7 @@ from glob import glob
 from multiprocessing import Pool, cpu_count
 
 import torch
+import torch.distributed as dist
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -45,21 +46,24 @@ class TokenizedDataset(Dataset):
         if os.path.exists(index_map_path):
             self.index_map = torch.load(index_map_path)
         else:
-            # Using multiprocessing to load data and measure lengths
-            with Pool(processes=cpu_count()) as pool:
-                lengths = list(tqdm(pool.imap(load_data, self.files), total=len(self.files), desc=f"Indexing Data"))
-            # Calculate index map
-            file_length_pairs = [(file_index, length) for file_index, length in enumerate(lengths)]
-            with Pool(processes=cpu_count()) as pool:
-                index_map_parts = list(tqdm(pool.imap(calculate_index_map, file_length_pairs),
-                                            total=len(file_length_pairs), desc="Calculating Index Map"))
-            self.index_map = [item for sublist in index_map_parts for item in sublist]
-            if shuffle:
-                self.index_map = torch.tensor(self.index_map)[torch.randperm(len(self.index_map))]
-
             local_rank = int(os.environ["LOCAL_RANK"])
             if local_rank == 0:
+                # Using multiprocessing to load data and measure lengths
+                with Pool(processes=cpu_count()) as pool:
+                    lengths = list(tqdm(pool.imap(load_data, self.files), total=len(self.files), desc=f"Indexing Data"))
+                # Calculate index map
+                file_length_pairs = [(file_index, length) for file_index, length in enumerate(lengths)]
+                with Pool(processes=cpu_count()) as pool:
+                    index_map_parts = list(tqdm(pool.imap(calculate_index_map, file_length_pairs),
+                                                total=len(file_length_pairs), desc="Calculating Index Map"))
+                self.index_map = [item for sublist in index_map_parts for item in sublist]
+                if shuffle:
+                    self.index_map = torch.tensor(self.index_map)[torch.randperm(len(self.index_map))]
                 torch.save(self.index_map, index_map_path)
+            dist.barrier()
+            if local_rank != 0:
+                self.index_map = torch.load(index_map_path)
+        dist.barrier()
 
         # split dataset
         entry_num = len(self.index_map)
