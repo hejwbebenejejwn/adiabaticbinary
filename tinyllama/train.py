@@ -190,7 +190,8 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
             else:
                 batch_wait += 1
 
-            print(f"Rank {local_rank} Accumulate Step Patience: {batch_wait}/{config.accum_step_patience}")
+            if local_rank == 0:
+                print(f"Accumulate Step Patience: {batch_wait}/{config.accum_step_patience}")
 
             # Check if we need to stop early
             dist.barrier()
@@ -292,7 +293,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
     file_path = f'{config.save_dir}/{config.file_prefix}-{current_epoch}.pt'
     train_state.save(file_path)
 
-    mean_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list)).item()
+    mean_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list[-config.patience * 2:])).item()
     last_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list[-config.patience:])).item()
 
     # update the best validation loss and train epoch
@@ -304,7 +305,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
     print(f"Mean Validation Loss: {mean_valid_loss:7.5f}")
     print(f"Current Mean Validation Loss: {last_valid_loss:7.5f}")
 
-    if mean_valid_loss < last_valid_loss:
+    if mean_valid_loss - last_valid_loss < 0.1:
         print("Pushing kk ...")
         # remove extra files
         file_to_del = [f'{config.save_dir}/{config.file_prefix}-{i}.pt'

@@ -49,4 +49,4 @@ class Config:
     kk_threshold: float = 100.  # kk threshold to divide training stage 1 and stage 2
     # TODO: determined according to initial model weights
     ratio: float = 0.1  # ratio of remaining kk being pushed to binary at each push in stage 2
-    patience = 5  # last epoches to calculate mean temporary validation loss
+    patience = 3  # last epoches to calculate mean temporary validation loss
