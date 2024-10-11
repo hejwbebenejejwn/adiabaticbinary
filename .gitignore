@@ -15,7 +15,7 @@ llama3/datasets/SlimPajama-627B
 llama3/datasets/tokenized
 llama3/models/
 
-# binary tiny paths to ignore
+# binary tinyllama paths to ignore
 tinyllama/task.pbs
 tinyllama/task.sh
 tinyllama/train.sh
@@ -23,3 +23,12 @@ tinyllama/datasets/SlimPajama-627B
 tinyllama/datasets/tokenized
 tinyllama/models
 tinyllama/results
+
+# binary gpt-neo paths to ignore
+gpt-neo/task.pbs
+gpt-neo/task.sh
+gpt-neo/train.sh
+gpt-neo/datasets/the_pile
+gpt-neo/datasets/tokenized
+gpt-neo/models
+gpt-neo/results

@@ -18,10 +18,9 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from transformers import LlamaForCausalLM
-from transformers.models.llama import LlamaConfig
+from transformers import GPTNeoConfig, GPTNeoForCausalLM
 
-from BinaryTinyLlama import BinaryLlamaForCausalLM
+from BinaryGPT import BinaryGPTNeoForCausalLM
 from config import Config
 from utils import batch_early_stop_check, get_model_kk, TrainingState
 
@@ -36,21 +35,22 @@ device = torch.device(f"cuda:{local_rank}")
 # %% trainer setup
 def set_up(config: Config, train_state: TrainingState) -> TrainingState:
     """Build model and Initialize optimizer & learning rate scheduler"""
-    llama_config = LlamaConfig.from_pretrained(Config.full_ckpt_dir)
-    llama_config.gradient_checkpointing = config.gradient_checkpointing
-    llama_config.use_cache = config.use_cache
-    train_state.llama_config = llama_config
+    gpt_config = GPTNeoConfig.from_pretrained(Config.full_ckpt_dir)
+    train_state.gpt_config = gpt_config
 
     ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name)
     # build binary model
     if local_rank == 0:
         print(f"Initializing Binary Model...")
-    binary_model = BinaryLlamaForCausalLM(llama_config)
+    binary_model = BinaryGPTNeoForCausalLM(gpt_config)
     for key, _ in binary_model.state_dict().items():
-        if key.endswith('.kk') or key.endswith('.aa') or key.endswith('.inv_freq'):
+        if key.endswith('.kk') or key.endswith('.aa'):
             continue
         elif key in ckpt_state_dict.keys():
             binary_model.state_dict()[key].copy_(ckpt_state_dict[key])
+        elif key == "lm_head.weight":
+            wte_weight = ckpt_state_dict["transformer.wte.weight"]
+            binary_model.state_dict()[key].copy_(wte_weight)
         else:
             raise KeyError(f"{key} not found in pretrained model.")
     binary_model.set_kk_stage1(
@@ -59,16 +59,17 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
     train_state.kk = config.initial_kk
     train_state.aa = config.initial_aa
 
-    # build tinyllama model
+    # build gpt-neo model
     if config.kd_training:
         if local_rank == 0:
             print(f"Initializing Full Precision Model...")
-        full_model = LlamaForCausalLM(llama_config)
+        full_model = GPTNeoForCausalLM(gpt_config)
         for key, _ in full_model.state_dict().items():
-            if key.endswith('.inv_freq'):
-                continue
-            elif key in ckpt_state_dict.keys():
+            if key in ckpt_state_dict.keys():
                 full_model.state_dict()[key].copy_(ckpt_state_dict[key])
+            elif key == "lm_head.weight":
+                wte_weight = ckpt_state_dict["transformer.wte.weight"]
+                full_model.state_dict()[key].copy_(wte_weight)
             else:
                 raise KeyError(f"{key} not found in pretrained model.")
         train_state.full_model = full_model
@@ -86,8 +87,8 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
 def training_step(
         batch,
         config: Config,
-        binary_model: BinaryLlamaForCausalLM,
-        full_model: LlamaForCausalLM,
+        binary_model: BinaryGPTNeoForCausalLM,
+        full_model: GPTNeoForCausalLM,
         loss_fn_mse: F.mse_loss,
 ) -> torch.Tensor:
     """Training Step"""
@@ -146,7 +147,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
             f"Epoch {train_state.epoch},",
             f"kk = {train_state.kk:.2f},",
             f"aa = {train_state.aa:.2f}",
-            f"Training",
+            "Training",
             "=" * 10,
             flush=True
         )
@@ -191,7 +192,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
                 batch_wait += 1
 
             if local_rank == 0:
-                print(f"Accumulate Step Patience: {batch_wait}/{config.accum_step_patience}")
+                print(f"accumulation step wait: {batch_wait}/{config.accum_step_patience}")
 
             # Check if we need to stop early
             dist.barrier()
@@ -199,7 +200,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
             global_stop_flag = batch_early_stop_check(local_stop_flag)
             if global_stop_flag:
                 if local_rank == 0:
-                    print("Early stopping triggered.")
+                    print("batch early stopping triggered.")
                 break
 
     GPUtil.showUtilization()
@@ -214,7 +215,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
 
 
 # %% validation
-def validation_step(batch, config: Config, binary_model: BinaryLlamaForCausalLM) -> torch.Tensor:
+def validation_step(batch, config: Config, binary_model: BinaryGPTNeoForCausalLM) -> torch.Tensor:
     """Validation Step"""
     input_tokens = batch[:, 0:config.block_size].contiguous()
     target_tokens = batch[:, 1:config.block_size + 1].contiguous().long()
@@ -248,7 +249,7 @@ def validation(valid_dataloader: DataLoader, config: Config, train_state: Traini
                 print(f"Epoch Step: {i + 1:6d} | Loss: {valid_loss:6.2f}")
 
     mean_valid_loss = torch.mean(torch.tensor(valid_epoch_loss)).item()
-    train_state.temp_valid_loss_list.append(mean_valid_loss)
+    train_state.current_valid_loss = mean_valid_loss
     wandb.log({'valid_loss': mean_valid_loss})
 
     # calculate unbinary ratio
@@ -282,7 +283,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
 
     # adjust gamma
     mean_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio)).item()
-    last_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio[-config.patience:])).item()
+    last_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio[-config.epoch_patience:])).item()
     if (mean_unbinary_ratio - last_unbinary_ratio) > 0.01:
         config.base_gamma -= 0.1
     elif (mean_unbinary_ratio - last_unbinary_ratio) < 0.01:
@@ -293,19 +294,26 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
     file_path = f'{config.save_dir}/{config.file_prefix}-{current_epoch}.pt'
     train_state.save(file_path)
 
-    mean_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list[-config.patience * 2:])).item()
-    last_valid_loss = torch.mean(torch.tensor(train_state.temp_valid_loss_list[-config.patience:])).item()
-
     # update the best validation loss and train epoch
-    current_valid_loss = train_state.temp_valid_loss_list[-1]
-    if current_valid_loss < train_state.best_valid_loss:
+    current_valid_loss = train_state.current_valid_loss
+    best_valid_loss = train_state.best_valid_loss
+    if current_valid_loss < best_valid_loss:
         train_state.best_valid_loss = current_valid_loss
         train_state.best_epoch = current_epoch
+        train_state.epoch_wait = 0
+    else:
+        train_state.epoch_wait += 1
 
-    print(f"Mean Validation Loss: {mean_valid_loss:7.5f}")
-    print(f"Current Mean Validation Loss: {last_valid_loss:7.5f}")
+    if local_rank == 0:
+        print(f"Epoch Wait: {train_state.epoch_wait:7d}")
+        print(f"Current Valid Loss: {train_state.current_valid_loss:7.5f}")
+        print(f"Best Validation Loss: {train_state.best_valid_loss:7.5f}")
 
-    if mean_valid_loss - last_valid_loss < 0.1:
+    # Check if we need to stop early
+    dist.barrier()
+    local_stop_flag = train_state.epoch_wait >= config.epoch_patience
+    global_stop_flag = batch_early_stop_check(local_stop_flag)
+    if global_stop_flag:
         print("Pushing kk ...")
         # remove extra files
         file_to_del = [f'{config.save_dir}/{config.file_prefix}-{i}.pt'
@@ -314,7 +322,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
             os.remove(file)
         # load best state
         best_file = f'{config.save_dir}/{config.file_prefix}-{train_state.best_epoch}.pt'
-        print(f"Return back to Epoch{train_state.best_epoch}.")
+        print(f"Return back to Epoch {train_state.best_epoch}.")
         train_state = TrainingState.from_dict(torch.load(best_file)['train_state'])
 
         # %% push kk and aa
@@ -341,9 +349,8 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
         wandb.log({'aa': aa})
 
         # initialize temporary parameters
-        train_state.best_epoch = 0
-        train_state.best_valid_loss = torch.tensor(float('inf')).item()
-        train_state.current_valid_loss = []
+        train_state.best_valid_loss = float('inf')
+        train_state.current_valid_loss = best_valid_loss
         train_state.temp_unbinary_ratio = []
 
     return train_state
@@ -399,7 +406,7 @@ def main(config: Config) -> None:
         if local_rank == 0:
             print("=" * 20, "Preparing Model", "=" * 20)
         train_state = set_up(config, train_state)
-    llama_config = train_state.llama_config
+    llama_config = train_state.gpt_config
 
     # prepare datasets
     train_dataset = TokenizedDataset(
