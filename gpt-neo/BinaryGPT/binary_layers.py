@@ -58,21 +58,24 @@ class BinaryLinear(Module):
         )
 
     # External modification of kk & aa stage 1
-    def set_kk_stage1(self, kknew: Tensor):
+    def set_kk_stage1(self, kknew: list):
         with torch.no_grad():
+            kknew = torch.tensor(kknew, dtype=self.weight.dtype, device=self.weight.device)
             self.kk = Parameter(kknew[0], requires_grad=False)
             self.aa = Parameter(kknew[1], requires_grad=False)
 
     # External modification of kk & aa stage 2
-    def set_kk_stage2(self, ratio: Tensor):
+    def set_kk_stage2(self, ratio: float):
         with torch.no_grad():
-            q = (1 - ratio).float()
+            q = 1 - ratio
+            ratio = torch.tensor(ratio, dtype=self.weight.dtype, device=self.weight.device)
             weight_flatten = self.weight.flatten().abs().float()
             weight_indice = weight_flatten < 2 * torch.pow(self.kk.to(device=ratio.device, dtype=ratio.dtype), -1)
-            # Sample approximately 10% of the indices that meet the condition
             total_elements = weight_indice.sum().item()
+            weight_indice = torch.nonzero(weight_indice, as_tuple=False).view(-1)
+            # Sample approximately 10% of the indices that meet the condition
             sample_size = int(total_elements * 0.025)
-            selected_indices = torch.randint(0, total_elements, (sample_size,))
+            selected_indices = weight_indice[torch.randint(0, total_elements, (sample_size,))]
             # Using sampled indices to calculate quantile
             quantile_value = torch.quantile(weight_flatten[selected_indices], q).to(ratio.device, ratio.dtype)
             # Update kk

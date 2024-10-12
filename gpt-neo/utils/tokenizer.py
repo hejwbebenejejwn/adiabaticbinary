@@ -23,8 +23,8 @@ class Tokenizer:
             with open(checkpoint_dir / "tokenizer_config.json") as fp:
                 config = json.load(fp)
             bos_token = config.get("bos_token")
-            self.bos_id = self.token_to_id(bos_token) if bos_token is not None else None
-            self.eos_id = self.token_to_id(config["eos_token"])
+            self.bos_id = self.token_to_id(bos_token["content"]) if bos_token is not None else None
+            self.eos_id = self.token_to_id(config["eos_token"]["content"])
         else:
             raise NotImplementedError
 

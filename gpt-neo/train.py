@@ -1,3 +1,4 @@
+import copy
 import os
 import platform
 import re
@@ -7,7 +8,6 @@ from multiprocessing import cpu_count
 from pathlib import Path
 
 import GPUtil
-import fire
 import psutil
 import torch
 import torch.distributed as dist
@@ -24,6 +24,8 @@ from BinaryGPT import BinaryGPTNeoForCausalLM
 from config import Config
 from utils import batch_early_stop_check, get_model_kk, TrainingState
 
+# torch.autograd.set_detect_anomaly(True)
+
 torch.set_float32_matmul_precision('medium')
 
 rank = int(os.environ["RANK"])
@@ -38,7 +40,7 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
     gpt_config = GPTNeoConfig.from_pretrained(Config.full_ckpt_dir)
     train_state.gpt_config = gpt_config
 
-    ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name)
+    ckpt_state_dict = torch.load(Path(Config.full_ckpt_dir) / Config.full_ckpt_name, map_location=device)
     # build binary model
     if local_rank == 0:
         print(f"Initializing Binary Model...")
@@ -48,13 +50,9 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
             continue
         elif key in ckpt_state_dict.keys():
             binary_model.state_dict()[key].copy_(ckpt_state_dict[key])
-        elif key == "lm_head.weight":
-            wte_weight = ckpt_state_dict["transformer.wte.weight"]
-            binary_model.state_dict()[key].copy_(wte_weight)
         else:
             raise KeyError(f"{key} not found in pretrained model.")
-    binary_model.set_kk_stage1(
-        torch.tensor([config.initial_kk, config.initial_aa], dtype=config.dtype, device=binary_model.device))
+    binary_model.set_kk_stage1([config.initial_kk, config.initial_aa])
     train_state.binary_model = binary_model
     train_state.kk = config.initial_kk
     train_state.aa = config.initial_aa
@@ -67,9 +65,6 @@ def set_up(config: Config, train_state: TrainingState) -> TrainingState:
         for key, _ in full_model.state_dict().items():
             if key in ckpt_state_dict.keys():
                 full_model.state_dict()[key].copy_(ckpt_state_dict[key])
-            elif key == "lm_head.weight":
-                wte_weight = ckpt_state_dict["transformer.wte.weight"]
-                full_model.state_dict()[key].copy_(wte_weight)
             else:
                 raise KeyError(f"{key} not found in pretrained model.")
         train_state.full_model = full_model
@@ -238,7 +233,6 @@ def validation(valid_dataloader: DataLoader, config: Config, train_state: Traini
             "=" * 10,
             flush=True
         )
-    train_state.epoch += 1
     with torch.no_grad(), autocast(dtype=torch.float16):
         valid_epoch_loss = []
         for i, data in enumerate(valid_dataloader):
@@ -283,21 +277,21 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
 
     # adjust gamma
     mean_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio)).item()
-    last_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio[-config.epoch_patience:])).item()
+    last_unbinary_ratio = torch.mean(torch.tensor(train_state.temp_unbinary_ratio[-config.kk_epoch_patience:])).item()
     if (mean_unbinary_ratio - last_unbinary_ratio) > 0.01:
         config.base_gamma -= 0.1
     elif (mean_unbinary_ratio - last_unbinary_ratio) < 0.01:
         config.base_gamma += 0.1
     train_state.lr_scheduler.gamma = config.base_gamma
 
-    # save checkpoint
-    file_path = f'{config.save_dir}/{config.file_prefix}-{current_epoch}.pt'
-    train_state.save(file_path)
+    if local_rank == 0:
+        print(f"Current Valid Loss: {train_state.current_valid_loss:6.5f}")
+        print(f"Best Validation Loss: {train_state.best_valid_loss:6.5f}")
 
     # update the best validation loss and train epoch
     current_valid_loss = train_state.current_valid_loss
     best_valid_loss = train_state.best_valid_loss
-    if current_valid_loss < best_valid_loss:
+    if current_valid_loss <= best_valid_loss:
         train_state.best_valid_loss = current_valid_loss
         train_state.best_epoch = current_epoch
         train_state.epoch_wait = 0
@@ -305,25 +299,28 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
         train_state.epoch_wait += 1
 
     if local_rank == 0:
-        print(f"Epoch Wait: {train_state.epoch_wait:7d}")
-        print(f"Current Valid Loss: {train_state.current_valid_loss:7.5f}")
-        print(f"Best Validation Loss: {train_state.best_valid_loss:7.5f}")
+        print(f"Best Epoch: {train_state.best_epoch:1d}")
+        print(f"Epoch Wait: {train_state.epoch_wait:1d}/{config.kk_epoch_patience}")
+
+    # save checkpoint
+    file_path = f'{config.binary_save_dir}/{config.binary_file_prefix}-{current_epoch}.pt'
+    train_state.save(file_path)
 
     # Check if we need to stop early
     dist.barrier()
-    local_stop_flag = train_state.epoch_wait >= config.epoch_patience
+    local_stop_flag = train_state.epoch_wait >= config.kk_epoch_patience
     global_stop_flag = batch_early_stop_check(local_stop_flag)
     if global_stop_flag:
         print("Pushing kk ...")
         # remove extra files
-        file_to_del = [f'{config.save_dir}/{config.file_prefix}-{i}.pt'
+        file_to_del = [f'{config.binary_save_dir}/{config.binary_file_prefix}-{i}.pt'
                        for i in range(train_state.best_epoch + 1, current_epoch + 1)]
         for file in file_to_del:
             os.remove(file)
         # load best state
-        best_file = f'{config.save_dir}/{config.file_prefix}-{train_state.best_epoch}.pt'
+        best_file = f'{config.binary_save_dir}/{config.binary_file_prefix}-{train_state.best_epoch}.pt'
         print(f"Return back to Epoch {train_state.best_epoch}.")
-        train_state = TrainingState.from_dict(torch.load(best_file)['train_state'])
+        train_state = TrainingState.from_dict(torch.load(best_file, map_location=device)['train_state'])
 
         # %% push kk and aa
         kk, _ = get_model_kk(train_state.binary_model)
@@ -332,14 +329,25 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
             aa = 1 / kk
         else:
             kk *= config.kk_lr2
-            aa = torch.tensor([1.], dtype=kk.dtype, device=device)
+            aa = 1.
 
+        # train state determination
+        if local_rank == 0 and train_state.stage == 1:
+            try_binary_model = copy.deepcopy(train_state.binary_model.module).to('cpu')
+            try_binary_model.set_kk_stage2(config.ratio)
+            try_kk, _ = get_model_kk(try_binary_model)
+            if try_kk - kk < config.kk_threshold:
+                train_state.stage = 2
+            del try_binary_model
+            torch.cuda.empty_cache()
         # stage 1
-        if kk < config.kk_threshold:
-            train_state.binary_model.module.set_kk_stage1(torch.tensor([kk, aa], dtype=kk.dtype, device=device))
+        if train_state.stage == 1:
+            train_state.binary_model.module.set_kk_stage1([kk, aa])
         # stage 2
+        elif train_state.stage == 2:
+            train_state.binary_model.module.set_kk_stage2(config.ratio)
         else:
-            train_state.binary_model.module.set_kk_stage2(torch.tensor(config.ratio, dtype=kk.dtype, device=device))
+            raise ValueError(f"Unexpected stage: {train_state.stage}")
 
         # record changes
         kk, aa = get_model_kk(train_state.binary_model)
@@ -359,7 +367,7 @@ def kk_callback(config: Config, train_state: TrainingState) -> TrainingState:
 # %% main function
 def main(config: Config) -> None:
     # initialize
-    os.makedirs(config.save_dir, exist_ok=True)
+    os.makedirs(config.binary_save_dir, exist_ok=True)
     dist.init_process_group(backend='nccl')
 
     # show platform information
@@ -387,26 +395,33 @@ def main(config: Config) -> None:
         GPUtil.showUtilization()
 
     # check if resume
-    ckpt_files = glob(f'{config.save_dir}/*.pt', recursive=True)
+    ckpt_files = glob(f'{config.binary_save_dir}/*.pt', recursive=True)
     latest_checkpoint = max(ckpt_files, key=lambda x: int(re.search(r'(\d+)', x).group(1)), default=None)
     if latest_checkpoint:
         if local_rank == 0:
             print("=" * 20, f"Resume from {latest_checkpoint}", "=" * 20)
             print("Loading Checkpoint...")
-        train_state = TrainingState.from_dict(torch.load(latest_checkpoint)['train_state'])
+        train_state = TrainingState.from_dict(torch.load(latest_checkpoint, map_location=device)['train_state'])
         # initialize
-        wandb.init(project='binary-llama', mode="offline", id=train_state.wandb_run_id)
+        wandb.init(project='binary-gpt-neo', mode="offline", id=train_state.wandb_run_id)
     else:
         # initialize
         train_state = TrainingState()
-        run = wandb.init(project='binary-llama', mode="offline")
+        run = wandb.init(project='binary-gpt-neo', mode="offline")
         train_state.wandb_run_id = run.id
         wandb.config.update(config)
         # prepare model
         if local_rank == 0:
             print("=" * 20, "Preparing Model", "=" * 20)
         train_state = set_up(config, train_state)
-    llama_config = train_state.gpt_config
+
+        # make ddp model
+        binary_model = train_state.binary_model.to(device)
+        train_state.binary_model = DDP(binary_model, device_ids=[local_rank], output_device=local_rank)
+        if config.kd_training:
+            full_model = train_state.full_model.to(device)
+            train_state.full_model = DDP(full_model, device_ids=[local_rank], output_device=local_rank)
+    gpt_neo_config = train_state.gpt_config
 
     # prepare datasets
     train_dataset = TokenizedDataset(
@@ -416,7 +431,7 @@ def main(config: Config) -> None:
         mode='training',
         shuffle=config.shuffle,
         max_seq_len=config.max_seq_len,
-        pad_id=llama_config.pad_token_id
+        pad_id=gpt_neo_config.pad_token_id
     )
     valid_dataset = TokenizedDataset(
         tokenized_dataset_path=config.tokenized_dataset_dir,
@@ -425,7 +440,7 @@ def main(config: Config) -> None:
         mode='validation',
         shuffle=config.shuffle,
         max_seq_len=config.max_seq_len,
-        pad_id=llama_config.pad_token_id
+        pad_id=gpt_neo_config.pad_token_id
     )
     test_dataset = TokenizedDataset(
         tokenized_dataset_path=config.tokenized_dataset_dir,
@@ -434,7 +449,7 @@ def main(config: Config) -> None:
         mode='test',
         shuffle=config.shuffle,
         max_seq_len=config.max_seq_len,
-        pad_id=llama_config.pad_token_id
+        pad_id=gpt_neo_config.pad_token_id
     )
     # dataloaders
     train_sampler = DistributedSampler(train_dataset)
@@ -464,23 +479,10 @@ def main(config: Config) -> None:
 
     # start training
     current_unbinary_ratio = 1.
-    binary_model = train_state.binary_model
-    binary_model.to(device)
-    # make ddp model
-    train_state.binary_model = DDP(binary_model, device_ids=[local_rank], output_device=local_rank)
-    if config.kd_training:
-        full_model = train_state.full_model
-        full_model.to(device)
-        # make ddp model
-        train_state.full_model = DDP(full_model, device_ids=[local_rank], output_device=local_rank)
-
-    # run training
     while current_unbinary_ratio > config.unbinary_ratio_threshold:
+        train_state.epoch += 1
         if local_rank == 0:
-            if train_state.kk < config.kk_threshold:
-                print("=" * 20, "Training Stage 1", "=" * 20)
-            else:
-                print("=" * 20, "Training Stage 2", "=" * 20)
+            print("=" * 20, f"Training Stage {train_state.stage}", "=" * 20)
 
         train_state = training(train_dataloader, config, train_state)
         train_state = validation(valid_dataloader, config, train_state)
@@ -489,4 +491,4 @@ def main(config: Config) -> None:
 
 
 if __name__ == '__main__':
-    fire.Fire(main(Config()))
+    main(Config())

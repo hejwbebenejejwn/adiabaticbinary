@@ -37,8 +37,8 @@ def get_model_kk(model, ):
             aa_list.append(module.aa)
         except Exception:
             pass
-    model_kk = torch.stack(kk_list, dim=0).mean(dim=0)
-    model_aa = torch.stack(aa_list, dim=0).mean(dim=0)
+    model_kk = torch.stack(kk_list, dim=0).mean(dim=0).item()
+    model_aa = torch.stack(aa_list, dim=0).mean(dim=0).item()
     return model_kk, model_aa
 
 
@@ -54,6 +54,7 @@ class TrainingState:
             kk: float = 1.0,
             aa: float = 1.0,
             epoch: int = 0,
+            stage: int = 1,
             accum_step: int = 0,
             unbinary_ratio: Optional[List[float]] = None,
             wandb_run_id: Optional[str] = None,
@@ -75,6 +76,7 @@ class TrainingState:
         self.kk = kk
         self.aa = aa
         self.epoch = epoch
+        self.stage = stage
         self.accum_step = accum_step
         self.unbinary_ratio = unbinary_ratio if unbinary_ratio is not None else []
         self.wandb_run_id = wandb_run_id
@@ -97,6 +99,7 @@ class TrainingState:
             'kk': self.kk,
             'aa': self.aa,
             'epoch': self.epoch,
+            "stage": self.stage,
             'accum_step': self.accum_step,
             'unbinary_ratio': self.unbinary_ratio,
             'wandb_run_id': self.wandb_run_id,
@@ -124,6 +127,7 @@ class TrainingState:
             kk=state_dict.get('kk', 1.0),
             aa=state_dict.get('aa', 1.0),
             epoch=state_dict.get('epoch', 0),
+            stage=state_dict.get('stage', 1),
             accum_step=state_dict.get('accum_step', 0),
             unbinary_ratio=state_dict.get('unbinary_ratio', []),
             wandb_run_id=state_dict.get('wandb_run_id'),
