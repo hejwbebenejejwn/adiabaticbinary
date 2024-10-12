@@ -1,4 +1,4 @@
-## Binary KD Training
+## Binary KD Training for GPT-NEO
 
 ## STEP1
 
@@ -29,15 +29,16 @@ pip install -r requirements.txt
 * Download Pre-trained Model Weights:
 
 ```bash
-cd path/to/project/gpt-neo/models
-git lfs clone https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-715k-1.5T
+cd models
+git lfs clone https://huggingface.co/EleutherAI/gpt-neo-125m
 ```
 
-* Add Parameters to Initial Model:
+* Copy key model parameters:
 
 ```bash
-cd path/to/project/tinyllama
-python add_parameters.py
+mkdir gpt-neo
+cd gpt-neo-125m
+cp *.json ../gpt-neo
 ```
 
 ## STEP3
@@ -45,25 +46,46 @@ python add_parameters.py
 * Download Data Sets:
 
 ```bash
-cd path/to/project/tinyllama/datasets
-git lfs clone https://huggingface.co/datasets/cerebras/SlimPajama-627B
+cd ../../datasets
+git lfs clone https://huggingface.co/datasets/ajibawa-2023/General-Stories-Collection
 ```
 
 * Tokenize Data Sets:
 
 ```bash
-cd path/to/project/tinyllama/datasets
-python prepare_slimpajama.py
+cd ..
+python datasets/prepare_general_stories.py
 ```
 
 ## STEP4
+
+### Pre-Training
+
+* single node with multi GPUs:
+
+```bash
+torchrun --nproc_per_node=8 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=12345 pretrain.py
+```
+
+* multi nodes, each with single GPU:
+
+```bash
+cd path/to/project/tinyllama
+# on node 1
+torchrun --nproc_per_node=1 --nnodes=4 --node_rank=0 --master_addr="192.168.0.1" --master_port=12345 pretrain.py
+# on node 2
+torchrun --nproc_per_node=1 --nnodes=4 --node_rank=1 --master_addr="192.168.0.1" --master_port=12345 pretrain.py
+# on node 3
+torchrun --nproc_per_node=1 --nnodes=4 --node_rank=2 --master_addr="192.168.0.1" --master_port=12345 pretrain.py
+# on node 4
+torchrun --nproc_per_node=1 --nnodes=4 --node_rank=3 --master_addr="192.168.0.1" --master_port=12345 pretrain.py
+```
 
 ### Start Training
 
 * single node with multi GPUs:
 
 ```bash
-cd path/to/project/tinyllama
 torchrun --nproc_per_node=8 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=12345 train.py
 ```
 
