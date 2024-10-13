@@ -28,6 +28,7 @@ class Config:
     accum_batches: int = 8
 
     unbinary_ratio_threshold: float = 0.005  # training termination threshold
+    valid_loss_threshold: float = 0.01  # loss tolerance for current_valid_loss and best_valid_loss
     betas: Tuple[float, float] = (0.9, 0.95)
     base_lr: float = 1e-4
     base_step_size: int = 100

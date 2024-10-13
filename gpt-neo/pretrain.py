@@ -96,6 +96,7 @@ def training(train_dataloader: DataLoader, config: Config, train_state: Training
     accumulated_loss = 0.0  # initialize for batch accumulation
     batch_wait = 0  # initialize batch_patience
     min_loss = float('inf')  # initialize min_loss
+    train_state.accum_step = 0  # initialize accumulation step
     for i, data in enumerate(train_dataloader):
         start = time.time()
         data = data.to(device, non_blocking=True)
@@ -318,7 +319,7 @@ def main(config: Config) -> None:
         # update the best validation loss and train epoch
         current_valid_loss = train_state.current_valid_loss
         best_valid_loss = train_state.best_valid_loss
-        if current_valid_loss <= best_valid_loss:
+        if current_valid_loss - best_valid_loss < -config.valid_loss_threshold:
             train_state.best_valid_loss = current_valid_loss
             train_state.best_epoch = current_epoch
             train_state.epoch_wait = 0
